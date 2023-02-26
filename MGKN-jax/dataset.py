@@ -28,19 +28,36 @@ def read_field(data, field: str, num: int, r: int, is_matlab_format: bool):
   return x[:num, ::r, ::r].reshape(num, -1)
 
 
-class GaussianNormalizer:
+class Normalizer:
 
-  def __init__(self, x, eps=0.00001):
-    self.mean = np.mean(x)
-    self.std = np.std(x)
+  def __init__(self, x, pointwise: bool = False, eps: float = 1e-5):
+    if pointwise:
+      self.mean = np.mean(x, 0)
+      self.std = np.std(x, 0)
+    else:
+      self.mean = np.mean(x)
+      self.std = np.std(x)
     self.eps = eps
+    self.normalized = self.normalize(x)
 
   def normalize(self, x):
     x = (x - self.mean) / (self.std + self.eps)
     return x
 
-  def unnormalize(self, x):
-    x = (x * (self.std + self.eps)) + self.mean
+  def unnormalize(self, x, sample_idx=None):
+    if sample_idx is None:
+      std = self.std + self.eps  # n
+      mean = self.mean
+    else:
+      if len(self.mean.shape) == len(sample_idx[0].shape):
+        std = self.std[sample_idx] + self.eps  # batch*n
+        mean = self.mean[sample_idx]
+      if len(self.mean.shape) > len(sample_idx[0].shape):
+        std = self.std[:, sample_idx] + self.eps  # T*batch*n
+        mean = self.mean[:, sample_idx]
+
+    # x is in shape of batch*n or T*batch*n
+    x = (x * std) + mean
     return x
 
 
@@ -57,13 +74,18 @@ class ParametricEllipticalPDE:
     in_fields = ["coeff", "Kcoeff", "Kcoeff_x", "Kcoeff_y"]
     train_data, is_matlab_format = load_file(train_path)
     self.train_in = {
-      k: read_field(train_data, k, n_train, r, is_matlab_format)
+      k: Normalizer(read_field(train_data, k, n_train, r, is_matlab_format))
       for k in in_fields
     }
-    self.train_out = read_field(train_data, "sol", n_train, r, is_matlab_format)
+    self.train_out = Normalizer(
+      read_field(train_data, "sol", n_train, r, is_matlab_format),
+      pointwise=True
+    )
     test_data = load_file(test_path)
     self.test_in = {
-      k: read_field(test_data, k, n_test, r, is_matlab_format)
+      k: Normalizer(read_field(test_data, k, n_test, r, is_matlab_format))
       for k in in_fields
     }
-    self.test_out = read_field(test_data, "sol", n_test, r, is_matlab_format)
+    self.test_out = Normalizer(
+      read_field(test_data, "sol", n_test, r, is_matlab_format), pointwise=True
+    )
