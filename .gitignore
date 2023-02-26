@@ -12,3 +12,6 @@ docs/_build/
 *tmp*
 *viztracer*
 *profiler*
+*.zip
+/*.mat
+/data/
