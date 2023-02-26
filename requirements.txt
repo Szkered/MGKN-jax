@@ -1,0 +1,9 @@
+jax>=0.4.0
+jaxlib>=0.4.0
+distrax>=0.1.2
+optax>=0.1.4
+matplotlib>=3.6.2
+dm-haiku>=0.0.9
+matplotlib
+pandas
+scipy
