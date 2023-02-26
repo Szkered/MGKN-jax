@@ -7,3 +7,5 @@ dm-haiku>=0.0.9
 matplotlib
 pandas
 scipy
+ml-collections
+pydantic
