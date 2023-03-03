@@ -9,3 +9,4 @@ pandas
 scipy
 ml-collections
 pydantic
+jraph

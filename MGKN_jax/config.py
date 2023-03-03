@@ -50,9 +50,9 @@ class MGKNConfig:
 
   out_width: int = 1
 
-  mlp_config: MLPConfig = MLPConfig()
+  mlp_cfg: MLPConfig = MLPConfig()
 
-  nnconv_config: NNConvConfig = NNConvConfig()
+  nnconv_cfg: NNConvConfig = NNConvConfig()
 
 
 # @dataclass(config=config)
@@ -78,18 +78,32 @@ class MGKNConfig:
 
 
 @dataclass(config=config)
-class TrainConfig:
-  ntrain: int = 100
+class DataConfig:
+  train_path: str = 'data/piececonst_r241_N1024_smooth1.mat'
 
-  ntest: int = 100
+  test_path: str = 'data/piececonst_r241_N1024_smooth2.mat'
+
+  n_train: int = 100
+
+  n_test: int = 100
+
+  r: int = 1
+  """TODO: what's this"""
+
+
+@dataclass(config=config)
+class TrainConfig:
+  data_cfg: DataConfig = DataConfig()
 
   epochs: int = 200
 
-  learning_rate: float = 0.1 / ntrain
+  learning_rate: float = 0.1 / data_cfg.n_train
 
   scheduler_step: int = 10
 
   scheduler_gamma: float = 0.8
+
+  rng_seed: int = 137
 
 
 def get_config() -> ConfigDict:

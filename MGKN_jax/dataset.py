@@ -1,9 +1,10 @@
+from typing import Any, Tuple
+
+import h5py
 import numpy as np
 import scipy.io
-import h5py
-import sklearn.metrics
-from scipy.ndimage import gaussian_filter
-from typing import Tuple, Any
+
+from MGKN_jax.config import DataConfig
 
 
 def load_file(file_path: str) -> Tuple[Any, bool]:
@@ -63,29 +64,25 @@ class Normalizer:
 
 class ParametricEllipticalPDE:
 
-  def __init__(
-    self,
-    train_path: str,
-    test_path: str,
-    n_train: int = 100,
-    n_test: int = 100,
-    r: int = 1
-  ):
+  def __init__(self, cfg: DataConfig):
     in_fields = ["coeff", "Kcoeff", "Kcoeff_x", "Kcoeff_y"]
-    train_data, is_matlab_format = load_file(train_path)
+    train_data, is_matlab_format = load_file(cfg.train_path)
     self.train_in = {
-      k: Normalizer(read_field(train_data, k, n_train, r, is_matlab_format))
-      for k in in_fields
+      k: Normalizer(
+        read_field(train_data, k, cfg.n_train, cfg.r, is_matlab_format)
+      ) for k in in_fields
     }
     self.train_out = Normalizer(
-      read_field(train_data, "sol", n_train, r, is_matlab_format),
+      read_field(train_data, "sol", cfg.n_train, cfg.r, is_matlab_format),
       pointwise=True
     )
-    test_data = load_file(test_path)
+    test_data, _ = load_file(cfg.test_path)
     self.test_in = {
-      k: Normalizer(read_field(test_data, k, n_test, r, is_matlab_format))
+      k:
+      Normalizer(read_field(test_data, k, cfg.n_test, cfg.r, is_matlab_format))
       for k in in_fields
     }
     self.test_out = Normalizer(
-      read_field(test_data, "sol", n_test, r, is_matlab_format), pointwise=True
+      read_field(test_data, "sol", cfg.n_test, cfg.r, is_matlab_format),
+      pointwise=True
     )
