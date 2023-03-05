@@ -33,6 +33,13 @@ class NNConvConfig:
 
 
 @dataclass(config=config)
+class MeshConfig:
+
+  sub_mesh_sizes: Tuple = (2400, 1600, 400, 100, 25)
+  """mesh sizes for each resolution level, ordering from finest to coarsest"""
+
+
+@dataclass(config=config)
 class MGKNConfig:
   ker_width: int = 256
 
@@ -40,15 +47,12 @@ class MGKNConfig:
 
   ker_in: int = 6
 
-  points: Tuple = (2400, 1600, 400, 100, 25)
-  """grid sizes"""
-
-  level: int = 5
-
   in_width: int = 6
   """node_features"""
 
   out_width: int = 1
+
+  mesh_cfg: MeshConfig = MeshConfig()
 
   mlp_cfg: MLPConfig = MLPConfig()
 
@@ -87,8 +91,18 @@ class DataConfig:
 
   n_test: int = 100
 
-  r: int = 1
-  """TODO: what's this"""
+  n_samples_per_train_data: int = 1
+
+  res: int = 1
+  """resolution of grid"""
+
+  domain_boundary = ((0, 1), (0, 1))
+  mesh_size = [int(((241 - 1) / res) + 1)] * 2
+  inner_radii = [0.5 / 8 * 1.41, 0.5 / 8, 0.5 / 4, 0.5 / 2, 0.5]
+  inter_radii = [0.5 / 8 * 1.1, 0.5 / 8 * 1.41, 0.5 / 4 * 1.41, 0.5 / 2 * 1.41]
+  """NOTE: this is hardcoded for the dataset"""
+
+  mesh_cfg: MeshConfig = MeshConfig()
 
 
 @dataclass(config=config)

@@ -61,7 +61,7 @@ class NNConv(hk.Module):
     self.nn = nn
     self.cfg = cfg
 
-  def __call__(self, x, edge_index, edge_attr=None, size=None):
+  def __call__(self, x, edge_index, edge_attr):
     """
     Args:
       x: (num_nodes, N)
@@ -96,10 +96,12 @@ class MGKN(hk.Module):
   ):
     super().__init__(name=name)
     self.cfg = cfg
-    self.points_total = np.sum(cfg.points)
+    self.points_total = np.sum(cfg.mesh_cfg.sub_mesh_sizes)
+    self.level = len(cfg.mesh_cfg.sub_mesh_sizes)
+    self.finest_mesh_size = cfg.mesh_cfg.sub_mesh_sizes[0]
 
     self.ker_widths = [
-      self.cfg.ker_width // (2**(l + 1)) for l in range(self.cfg.level)
+      self.cfg.ker_width // (2**(l + 1)) for l in range(cfg.level)
     ]
 
   def __call__(self, data):
@@ -152,7 +154,7 @@ class MGKN(hk.Module):
 
         x = jax.nn.relu(x)
 
-    x = MLP([self.cfg.ker_width], self.cfg.mlp_cfg)(x[:self.cfg.points[0]])
+    x = MLP([self.cfg.ker_width], self.cfg.mlp_cfg)(x[:self.finest_mesh_size])
     x = jax.nn.relu(x)
     x = MLP([1], self.cfg.mlp_cfg)(x)
     return x
