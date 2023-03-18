@@ -160,7 +160,7 @@ class RandomMultiMeshGenerator:
       mesh_size: original mesh size
     """
     self.cfg = cfg
-    self.n_dim = len(cfg.domain_boundary)  # dimension of domain
+
     sub_mesh_sizes = jnp.array(cfg.sub_mesh_sizes)
     self.sub_mesh_sizes = sub_mesh_sizes
     self.total_mesh_size = np.prod(sub_mesh_sizes)
@@ -182,7 +182,7 @@ class RandomMultiMeshGenerator:
       self.grid = jnp.vstack([xx.ravel() for xx in jnp.meshgrid(*grids)]).T
 
   def sample(self, key, node_data: List[Array], edge_data: Array = None):
-    """sample non-overlapping multi level/resolution graph"""
+    """sample non-overlapping multi level/resolution graph from the loaded grid."""
     perm = jax.random.permutation(key, self.n_grid_pts)
     sampled_indices = jnp.split(perm, jnp.cumsum(self.sub_mesh_sizes))[:-1]
     sampled_indices_all = perm[:self.total_mesh_size]
@@ -224,5 +224,22 @@ class RandomMultiMeshGenerator:
     inner_edge_attr = jnp.concatenate(inner_edge_attr, axis=-1)
     inter_edge_attr = jnp.concatenate(inter_edge_attr, axis=-1)
 
-    gt = jraph.GraphsTuple(nodes=nodes)
+    edges = jnp.concatenate([inner_edge_attr, inter_edge_attr], axis=-1)
+
+    globals = dict(
+      n_inner_edges=n_inner_edges,
+      n_inter_edges=n_inter_edges,
+      inner_edge_index=inner_edge_index,
+    )
+
+    gt = jraph.GraphsTuple(
+      nodes=nodes,
+      edges=edges,
+      senders=senders,
+      receivers=receivers,
+      n_node=len(nodes),
+      n_edge=len(edges),
+      globals=globals,
+    )
+
     return gt
