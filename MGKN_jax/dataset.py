@@ -199,6 +199,12 @@ class ParametricEllipticalPDE:
           )
 
 
+@dataclass
+class MultiMeshGlobals:
+  n_inner_edges: List[int]
+  n_inter_edges: List[int]
+
+
 class RandomMultiMeshGenerator:
   """Generate multi-level mesh for multi-level graph representation."""
 
@@ -237,7 +243,7 @@ class RandomMultiMeshGenerator:
     sampled_indices = jnp.split(perm, jnp.cumsum(self.sub_mesh_sizes))[:-1]
     sampled_indices_all = perm[:self.total_mesh_size]
 
-    # node features
+    # node features: grid_points + all features
     grid_samples = [self.grid[idx] for idx in sampled_indices]
     grid_sample_all = self.grid[sampled_indices_all]
 
@@ -253,7 +259,7 @@ class RandomMultiMeshGenerator:
       self.cfg.inter_radii
     )
 
-    # edge attributes, which is grid_point+aux_edge_data
+    # edge attributes, which is grid_point + aux_edge_data
     inner_edge_attr = [
       self.grid[e_idx.T].reshape(-1, 2 * self.n_dim)
       for e_idx in inner_edge_index
@@ -288,7 +294,9 @@ class RandomMultiMeshGenerator:
     inter_edge_attr = jnp.vstack(inter_edge_attr)
     edges = jnp.vstack([inner_edge_attr, inter_edge_attr])
 
-    globals = dict(n_inner_edges=n_inner_edges, n_inter_edges=n_inter_edges)
+    globals = MultiMeshGlobals(
+      **dict(n_inner_edges=n_inner_edges, n_inter_edges=n_inter_edges)
+    )
 
     gt = jraph.GraphsTuple(
       nodes=nodes,

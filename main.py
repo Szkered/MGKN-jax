@@ -18,14 +18,16 @@ def main(_):
   dataset = ParametricEllipticalPDE(cfg.train_cfg.data_cfg)
   data_gen = dataset.make_data_gen(cfg.train_cfg)
 
-  data = next(data_gen)
-  breakpoint()
+  data_init = next(data_gen)
 
   # init model
-  model = hk.multi_transform(lambda: MGKN(cfg).init_for_multitransform())
+  model = hk.multi_transform(
+    lambda: MGKN(cfg.mgkn_cfg).init_for_multitransform()
+  )
   rng = jax.random.PRNGKey(cfg.train_cfg.rng_seed)
-  fake_x = jnp.ones_like()  #  TODO
-  params = model.init(rng, fake_x)
+  params = model.init(rng, data_init)
+
+  breakpoint()
 
 
 if __name__ == "__main__":

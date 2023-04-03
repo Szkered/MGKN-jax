@@ -61,7 +61,7 @@ class NNConv(hk.Module):
     self.nn = nn
     self.cfg = cfg
 
-  def __call__(self, x, edge_index, edge_attr):
+  def __call__(self, x, senders, receivers, edge_attr):
     """
     Args:
       x: (num_nodes, N)
@@ -73,12 +73,14 @@ class NNConv(hk.Module):
     weight = self.nn(edge_attr)  # (num_edges, E')
     weight = weight.reshape(-1, self.cfg.width, self.cfg.width)
     # i, j = (1, 0) if self.flow == 'source_to_target' else (0, 1)
-    x_j = x[edge_index[1]][:, None]  # (num_edges, 1, E)
-    msgs = jnp.matmul(x_j, weight).squeeze(1)  # # (num_edges, OC)
+    x_j = x[senders][:, None]  # (num_edges, 1, E)
+    msgs = jnp.matmul(x_j, weight).squeeze(1)  # (num_edges, OC)
 
     # aggregate neighbours
     if self.cfg.aggr == "mean":
-      msg = jraph.segment_mean(msgs, edge_index[0])
+      msg = jraph.segment_mean(msgs, receivers)
+    elif self.cfg.aggr == "sum":
+      msg = jraph.segment_sum(msgs, receivers)
     else:
       raise NotImplementedError
 
@@ -101,10 +103,15 @@ class MGKN(hk.Module):
     self.finest_mesh_size = cfg.mesh_cfg.sub_mesh_sizes[0]
 
     self.ker_widths = [
-      self.cfg.ker_width // (2**(l + 1)) for l in range(cfg.level)
+      self.cfg.ker_width // (2**(l + 1)) for l in range(self.level)
     ]
 
-  def __call__(self, data):
+  def __call__(self, data: jraph.GraphsTuple):
+    n_inner_edges_total = sum(data.globals.n_inner_edges)
+    n_inter_edges_total = sum(data.globals.n_inter_edges)
+    n_edges = n_inner_edges_total + n_inter_edges_total
+    breakpoint()
+
     edge_index_down, edge_attr_down, range_down = data.edge_index_down, data.edge_attr_down, data.edge_index_down_range
     edge_index_mid, edge_attr_mid, range_mid = data.edge_index_mid, data.edge_attr_mid, data.edge_index_range
     edge_index_up, edge_attr_up, range_up = data.edge_index_up, data.edge_attr_up, data.edge_index_up_range
@@ -114,7 +121,7 @@ class MGKN(hk.Module):
     x = MLP([width], self.cfg.mlp_cfg)(data.x)
 
     # DOWNWARD: K12, K23, K34 ...
-    for l in range(self.cfg.level):
+    for l in range(self.level):
       kernel_l = MLP(
         [self.cfg.ker_in, self.ker_widths[l], width**2], self.cfg.mlp_cfg
       )
@@ -127,7 +134,7 @@ class MGKN(hk.Module):
       x = jax.nn.relu(x)
 
     # UPWARD: (K11, K21), (K22, K32), (K33, K43) ...
-    for l in reversed(range(self.cfg.level)):
+    for l in reversed(range(self.level)):
       # K11, K22, K33, ...
       kernel_l_ii = MLP(
         [self.cfg.ker_in, self.ker_widths[l], self.ker_widths[l], width**2],
