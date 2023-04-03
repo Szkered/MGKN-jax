@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import scipy.io
-from pydantic.es import dataclass
+from dataclasses import dataclass, fields, asdict
 
 from MGKN_jax.config import DataConfig, TrainConfig
 from MGKN_jax.types import Array
@@ -22,7 +22,7 @@ def load_file(file_path: str) -> Tuple[Any, bool]:
   return data, is_matlab_format
 
 
-def read_field(data, field: str, num: int, r: int, is_matlab_format: bool):
+def read_field(data, field: str, num: int, res: int, is_matlab_format: bool):
   """
   Args:
     r: resolution
@@ -35,7 +35,7 @@ def read_field(data, field: str, num: int, r: int, is_matlab_format: bool):
 
   x = x.astype(np.float32)  # TODO check this
 
-  return x[:num, ::r, ::r].reshape(num, -1)
+  return x[:num, ::res, ::res].reshape(num, -1)
 
 
 def calc_multilevel_connectivity(
@@ -104,29 +104,78 @@ class Normalizer:
     return x
 
 
+@dataclass
+class ParametricEllipticalPDEInput:
+  coeff: Normalizer
+  """a in Darcy flow"""
+
+  Kcoeff: Normalizer
+  """a_smooth"""
+
+  Kcoeff_x: Normalizer
+  """a_gradx"""
+
+  Kcoeff_y: Normalizer
+  """a_grady"""
+
+
 class ParametricEllipticalPDE:
+  """
+  Load Parametric Elliptical PDE data on a grid.
+
+  The equation is the 2d Darcy Flow
+
+  .. math::
+  \begin{alignat*}{3}
+    -\nabla \cdot (a(x) \nabla u(x)) &= f(x), \quad    &&x\in (0,1)^2 \\
+    u(x)&=0, \quad   &&x\in \partial(0,1)^2
+  \end{alignat*}
+
+  where $a(x)$ is the parameter/coefficient of the equation, and we want to learn
+  the mapping from $a(x)$ to $u(x)$.
+
+  The dataset consist of parameter $a(x)$ sampled from the distribution
+  .. math::
+  \(
+  \psi_\# \mathcal{N}(0, (-\Delta + 9I)^{-2})
+  \)
+
+  coeff has shape (num_sample, num_grid_points)
+  """
+
+  in_fields = [
+    "coeff",  # a
+    "Kcoeff",  # a_smooth
+    "Kcoeff_x",  # a_gradx
+    "Kcoeff_y",  # a_grady
+  ]
 
   def __init__(self, cfg: DataConfig):
     self.cfg = cfg
-    in_fields = ["coeff", "Kcoeff", "Kcoeff_x", "Kcoeff_y"]
     train_data, is_matlab_format = load_file(cfg.train_path)
 
-    self.train_in = {
-      k: Normalizer(
-        read_field(train_data, k, cfg.n_train, cfg.res, is_matlab_format)
-      ) for k in in_fields
-    }
+    self.train_in = ParametricEllipticalPDEInput(
+      **{
+        f.name: Normalizer(
+          read_field(
+            train_data, f.name, cfg.n_train, cfg.res, is_matlab_format
+          )
+        ) for f in fields(ParametricEllipticalPDEInput)
+      }
+    )
 
     self.train_out = Normalizer(
       read_field(train_data, "sol", cfg.n_train, cfg.res, is_matlab_format),
       pointwise=True
     )
     test_data, _ = load_file(cfg.test_path)
-    self.test_in = {
-      k: Normalizer(
-        read_field(test_data, k, cfg.n_test, cfg.res, is_matlab_format)
-      ) for k in in_fields
-    }
+    self.test_in = ParametricEllipticalPDEInput(
+      **{
+        f.name: Normalizer(
+          read_field(test_data, f.name, cfg.n_test, cfg.res, is_matlab_format)
+        ) for f in fields(ParametricEllipticalPDEInput)
+      }
+    )
 
     self.test_out = Normalizer(
       read_field(test_data, "sol", cfg.n_test, cfg.res, is_matlab_format),
@@ -142,7 +191,7 @@ class ParametricEllipticalPDE:
     for _ in range(cfg.epochs):
 
       for i in range(self.cfg.n_train):
-        node_data = [v.normalized[i, :] for v in self.train_in.values()]
+        node_data = [v.normalized[i, :] for v in asdict(self.train_in).values()]
         edge_data = self.train_in.coeff.normalized[i, :]
         for _ in range(self.cfg.n_samples_per_train_data):
           yield self.multi_mesh.sample(
@@ -161,10 +210,11 @@ class RandomMultiMeshGenerator:
     """
     self.cfg = cfg
 
-    sub_mesh_sizes = jnp.array(cfg.sub_mesh_sizes)
+    sub_mesh_sizes = jnp.array(cfg.mesh_cfg.sub_mesh_sizes)
     self.sub_mesh_sizes = sub_mesh_sizes
-    self.total_mesh_size = np.prod(sub_mesh_sizes)
+    self.total_mesh_size = sub_mesh_sizes.sum()
     self.level = len(sub_mesh_sizes)
+    self.n_dim = len(cfg.domain_boundary)
 
     assert len(cfg.mesh_size) == self.n_dim
 
@@ -192,7 +242,9 @@ class RandomMultiMeshGenerator:
     grid_sample_all = self.grid[sampled_indices_all]
 
     nodes = jnp.concatenate(
-      [grid_sample_all] + [d[sampled_indices_all] for d in node_data], axis=-1
+      [grid_sample_all] +
+      [d[sampled_indices_all][..., None] for d in node_data],
+      axis=-1
     )
 
     # calculate connectivity
@@ -202,14 +254,20 @@ class RandomMultiMeshGenerator:
     )
 
     # edge attributes, which is grid_point+aux_edge_data
-    inner_edge_attr = [self.grid[e_idx.T] for e_idx in inner_edge_index]
+    inner_edge_attr = [
+      self.grid[e_idx.T].reshape(-1, 2 * self.n_dim)
+      for e_idx in inner_edge_index
+    ]
     if edge_data is not None:
       inner_edge_attr = [
         jnp.concatenate([e_attr, edge_data[e_idx.T]], axis=-1)
         for e_idx, e_attr in zip(inner_edge_index, inner_edge_attr)
       ]
 
-    inter_edge_attr = [self.grid[e_idx.T] for e_idx in inter_edge_index]
+    inter_edge_attr = [
+      self.grid[e_idx.T].reshape(-1, 2 * self.n_dim)
+      for e_idx in inter_edge_index
+    ]
     if edge_data is not None:
       inter_edge_attr = [
         jnp.concatenate([e_attr, edge_data[e_idx.T]], axis=-1)
@@ -219,24 +277,24 @@ class RandomMultiMeshGenerator:
     # combine edges from all level into a single tensor
     n_inner_edges = [e.shape[-1] for e in inner_edge_index]
     n_inter_edges = [e.shape[-1] for e in inter_edge_index]
-    inner_edge_index = jnp.concatenate(inner_edge_index, axis=-1)
-    inter_edge_index = jnp.concatenate(inter_edge_index, axis=-1)
-    inner_edge_attr = jnp.concatenate(inner_edge_attr, axis=-1)
-    inter_edge_attr = jnp.concatenate(inter_edge_attr, axis=-1)
 
-    edges = jnp.concatenate([inner_edge_attr, inter_edge_attr], axis=-1)
+    # (2, n_edges)
+    inner_edge_index = jnp.hstack(inner_edge_index)
+    inter_edge_index = jnp.hstack(inter_edge_index)
+    edge_index = jnp.hstack([inner_edge_index, inter_edge_index])
 
-    globals = dict(
-      n_inner_edges=n_inner_edges,
-      n_inter_edges=n_inter_edges,
-      inner_edge_index=inner_edge_index,
-    )
+    # (n_edges, n_attr)
+    inner_edge_attr = jnp.vstack(inner_edge_attr)
+    inter_edge_attr = jnp.vstack(inter_edge_attr)
+    edges = jnp.vstack([inner_edge_attr, inter_edge_attr])
+
+    globals = dict(n_inner_edges=n_inner_edges, n_inter_edges=n_inter_edges)
 
     gt = jraph.GraphsTuple(
       nodes=nodes,
       edges=edges,
-      senders=senders,
-      receivers=receivers,
+      senders=edge_index[0],
+      receivers=edge_index[1],
       n_node=len(nodes),
       n_edge=len(edges),
       globals=globals,

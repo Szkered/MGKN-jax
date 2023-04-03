@@ -16,6 +16,10 @@ def main(_):
 
   # init data
   dataset = ParametricEllipticalPDE(cfg.train_cfg.data_cfg)
+  data_gen = dataset.make_data_gen(cfg.train_cfg)
+
+  data = next(data_gen)
+  breakpoint()
 
   # init model
   model = hk.multi_transform(lambda: MGKN(cfg).init_for_multitransform())

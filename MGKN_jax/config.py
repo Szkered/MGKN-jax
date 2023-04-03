@@ -97,10 +97,17 @@ class DataConfig:
   """resolution of grid"""
 
   domain_boundary = ((0, 1), (0, 1))
-  mesh_size = [int(((241 - 1) / res) + 1)] * 2
+  """boundary of domain"""
+
+  grid_size_per_dim = 241
+  """grid size per dimension. Assuming square domain"""
+
+  mesh_size = [(grid_size_per_dim - 1) // res + 1] * len(domain_boundary)
+  """total number of grid points"""
+
   inner_radii = [0.5 / 8 * 1.41, 0.5 / 8, 0.5 / 4, 0.5 / 2, 0.5]
   inter_radii = [0.5 / 8 * 1.1, 0.5 / 8 * 1.41, 0.5 / 4 * 1.41, 0.5 / 2 * 1.41]
-  """NOTE: this is hardcoded for the dataset"""
+  """NOTE: this is hardcoded for the 241 dataset"""
 
   mesh_cfg: MeshConfig = MeshConfig()
 
