@@ -107,7 +107,9 @@ class DataConfig:
 
   inner_radii = [0.5 / 8 * 1.41, 0.5 / 8, 0.5 / 4, 0.5 / 2, 0.5]
   inter_radii = [0.5 / 8 * 1.1, 0.5 / 8 * 1.41, 0.5 / 4 * 1.41, 0.5 / 2 * 1.41]
-  """NOTE: this is hardcoded for the 241 dataset"""
+  """Radii for constructing the multilevel mesh.
+  NOTE: this is the default value for the 241 dataset
+  """
 
   mesh_cfg: MeshConfig = MeshConfig()
 

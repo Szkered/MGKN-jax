@@ -107,63 +107,61 @@ class MGKN(hk.Module):
     ]
 
   def __call__(self, data: jraph.GraphsTuple):
-    n_inner_edges_total = sum(data.globals.n_inner_edges)
-    n_inter_edges_total = sum(data.globals.n_inter_edges)
-    n_edges = n_inner_edges_total + n_inter_edges_total
-    breakpoint()
-
-    edge_index_down, edge_attr_down, range_down = data.edge_index_down, data.edge_attr_down, data.edge_index_down_range
-    edge_index_mid, edge_attr_mid, range_mid = data.edge_index_mid, data.edge_attr_mid, data.edge_index_range
-    edge_index_up, edge_attr_up, range_up = data.edge_index_up, data.edge_attr_up, data.edge_index_up_range
 
     width = self.cfg.nnconv_cfg.width
 
-    x = MLP([width], self.cfg.mlp_cfg)(data.x)
+    x = MLP([width], self.cfg.mlp_cfg)(data.nodes["inputs"])
 
-    # DOWNWARD: K12, K23, K34 ...
-    for l in range(self.level):
-      kernel_l = MLP(
-        [self.cfg.ker_in, self.ker_widths[l], width**2], self.cfg.mlp_cfg
-      )
-      x = x + NNConv(
-        kernel_l, self.cfg.nnconv_cfg, name=f"K{l+1}{l+2}"
-      )(
-        x, edge_index_down[:, range_down[l, 0]:range_down[l, 1]],
-        edge_attr_down[range_down[l, 0]:range_down[l, 1], :]
-      )
-      x = jax.nn.relu(x)
+    edge_idx_range = jnp.concatenate([jnp.zeros(1), data.n_edge.cumsum()])
 
-    # UPWARD: (K11, K21), (K22, K32), (K33, K43) ...
-    for l in reversed(range(self.level)):
-      # K11, K22, K33, ...
-      kernel_l_ii = MLP(
-        [self.cfg.ker_in, self.ker_widths[l], self.ker_widths[l], width**2],
-        self.cfg.mlp_cfg
-      )
-      x = x + NNConv(
-        kernel_l_ii, self.cfg.nnconv_cfg, name=f"K{l+1}{l+1}"
-      )(
-        x, edge_index_mid[:, range_mid[l, 0]:range_mid[l, 1]],
-        edge_attr_mid[range_mid[l, 0]:range_mid[l, 1], :]
-      )
-      x = jax.nn.relu(x)
-
-      if l > 0:  # from previous (coarser) level: K21, K32, K43, ...
-        kernel_l_ji = MLP(
+    for _ in range(self.cfg.depth):
+      # DOWNWARD: K12, K23, K34 ...
+      for l in range(self.level - 1):
+        kernel_l = MLP(
           [self.cfg.ker_in, self.ker_widths[l], width**2], self.cfg.mlp_cfg
         )
+        start, end = edge_idx_range[l:l + 2]
         x = x + NNConv(
-          kernel_l_ji, self.cfg.nnconv_cfg, name=f"K{l+2}{l+1}"
+          kernel_l, self.cfg.nnconv_cfg, name=f"K{l+1}{l+2}"
         )(
-          x, edge_index_up[:, range_up[l - 1, 0]:range_up[l - 1, 1]],
-          edge_attr_up[range_up[l - 1, 0]:range_up[l - 1, 1], :]
+          x, data.senders[start:end], data.receivers[start:end],
+          data.edges[start:end]
         )
-
         x = jax.nn.relu(x)
+
+      # UPWARD: (K55), (K44, K54), (K33, K43) ...
+      for l in reversed(range(self.level)):
+        # K55, K44, K33, ...
+        kernel_l_ii = MLP(
+          [self.cfg.ker_in, self.ker_widths[l], self.ker_widths[l], width**2],
+          self.cfg.mlp_cfg
+        )
+        start, end = edge_idx_range[self.level + l:self.level + l + 2]
+        x = x + NNConv(
+          kernel_l_ii, self.cfg.nnconv_cfg, name=f"K{l+1}{l+1}"
+        )(
+          x, data.senders[start:end], data.receivers[start:end],
+          data.edges[start:end]
+        )
+        x = jax.nn.relu(x)
+
+        if l > 0:  # from previous (coarser) level: K54, K43, K32, ...
+          kernel_l_ji = MLP(
+            [self.cfg.ker_in, self.ker_widths[l], width**2], self.cfg.mlp_cfg
+          )
+          start, end = edge_idx_range[l:l + 2]
+          x = x + NNConv(
+            kernel_l_ji, self.cfg.nnconv_cfg, name=f"K{l+2}{l+1}"
+          )(
+            x, data.senders[start:end], data.receivers[start:end],
+            data.edges[start:end]
+          )
+
+          x = jax.nn.relu(x)
 
     x = MLP([self.cfg.ker_width], self.cfg.mlp_cfg)(x[:self.finest_mesh_size])
     x = jax.nn.relu(x)
-    x = MLP([1], self.cfg.mlp_cfg)(x)
+    x = MLP([1], self.cfg.mlp_cfg)(x)  # readout
     return x
 
   @hk.experimental.name_like("__call__")

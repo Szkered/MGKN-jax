@@ -44,9 +44,16 @@ def calc_multilevel_connectivity(
   inner_radii: List[float],
   inter_radii: List[float],
 ):
-  """
+  """Compute connectivity between nodes within each resolution and
+  between resolutions using Euclidean distance between nodes.
+
   Args:
+    sub_mesh_sizes: mesh size for each resolution level
     grid_samples: [(mesh_size, n_dim) for each mesh size]
+    inner_radii: create an edge between a pair of nodes within the same
+      level, if the distance between them is less than this radii
+    inter_radii: create an edge between a pair of nodes within the same
+      level, if the distance between them is less than this radii
   """
   pairwise_dist = lambda a, b: jnp.linalg.norm(a - b[:, None], axis=-1)
 
@@ -182,7 +189,12 @@ class ParametricEllipticalPDE:
       pointwise=True
     )
 
-    self.multi_mesh = RandomMultiMeshGenerator(cfg)
+    node_data = {
+      "inputs": [v.normalized for v in asdict(self.train_in).values()],
+      "outputs": self.train_out.normalized
+    }
+    edge_data = self.train_in.coeff.normalized
+    self.multi_mesh = RandomMultiMeshGenerator(cfg, node_data, edge_data)
 
   def make_data_gen(self, cfg: TrainConfig):
     rng = jax.random.PRNGKey(cfg.rng_seed)
@@ -191,24 +203,16 @@ class ParametricEllipticalPDE:
     for _ in range(cfg.epochs):
 
       for i in range(self.cfg.n_train):
-        node_data = [v.normalized[i, :] for v in asdict(self.train_in).values()]
-        edge_data = self.train_in.coeff.normalized[i, :]
         for _ in range(self.cfg.n_samples_per_train_data):
-          yield self.multi_mesh.sample(
-            key, node_data=node_data, edge_data=edge_data
-          )
-
-
-@dataclass
-class MultiMeshGlobals:
-  n_inner_edges: List[int]
-  n_inter_edges: List[int]
+          yield self.multi_mesh.sample(key, i)
 
 
 class RandomMultiMeshGenerator:
   """Generate multi-level mesh for multi-level graph representation."""
 
-  def __init__(self, cfg: DataConfig):
+  def __init__(
+    self, cfg: DataConfig, node_data: Dict[str, List[Array]], edge_data: Array
+  ):
     """
     Args:
       domain_boundary: (d, 2) where d is the dimension of the real space
@@ -237,8 +241,12 @@ class RandomMultiMeshGenerator:
       ]
       self.grid = jnp.vstack([xx.ravel() for xx in jnp.meshgrid(*grids)]).T
 
-  def sample(self, key, node_data: List[Array], edge_data: Array = None):
+    self.node_data = node_data
+    self.edge_data = edge_data
+
+  def sample(self, key, data_idx: int):
     """sample non-overlapping multi level/resolution graph from the loaded grid."""
+    # sample nodes
     perm = jax.random.permutation(key, self.n_grid_pts)
     sampled_indices = jnp.split(perm, jnp.cumsum(self.sub_mesh_sizes))[:-1]
     sampled_indices_all = perm[:self.total_mesh_size]
@@ -247,11 +255,15 @@ class RandomMultiMeshGenerator:
     grid_samples = [self.grid[idx] for idx in sampled_indices]
     grid_sample_all = self.grid[sampled_indices_all]
 
-    nodes = jnp.concatenate(
-      [grid_sample_all] +
-      [d[sampled_indices_all][..., None] for d in node_data],
+    inputs = jnp.concatenate(
+      [grid_sample_all] + [
+        d[data_idx, sampled_indices_all][..., None]
+        for d in self.node_data["inputs"]
+      ],
       axis=-1
     )
+    outputs = self.node_data["outputs"][data_idx, sampled_indices[0]]
+    nodes = dict(inputs=inputs, outputs=outputs)
 
     # calculate connectivity
     inner_edge_index, inter_edge_index = calc_multilevel_connectivity(
@@ -264,47 +276,54 @@ class RandomMultiMeshGenerator:
       self.grid[e_idx.T].reshape(-1, 2 * self.n_dim)
       for e_idx in inner_edge_index
     ]
-    if edge_data is not None:
-      inner_edge_attr = [
-        jnp.concatenate([e_attr, edge_data[e_idx.T]], axis=-1)
-        for e_idx, e_attr in zip(inner_edge_index, inner_edge_attr)
-      ]
+    inner_edge_attr = [
+      jnp.concatenate([e_attr, self.edge_data[data_idx][e_idx.T]], axis=-1)
+      for e_idx, e_attr in zip(inner_edge_index, inner_edge_attr)
+    ]
 
     inter_edge_attr = [
       self.grid[e_idx.T].reshape(-1, 2 * self.n_dim)
       for e_idx in inter_edge_index
     ]
-    if edge_data is not None:
-      inter_edge_attr = [
-        jnp.concatenate([e_attr, edge_data[e_idx.T]], axis=-1)
-        for e_idx, e_attr in zip(inter_edge_index, inter_edge_attr)
-      ]
-
-    # combine edges from all level into a single tensor
-    n_inner_edges = [e.shape[-1] for e in inner_edge_index]
-    n_inter_edges = [e.shape[-1] for e in inter_edge_index]
+    inter_edge_attr = [
+      jnp.concatenate([e_attr, self.edge_data[data_idx][e_idx.T]], axis=-1)
+      for e_idx, e_attr in zip(inter_edge_index, inter_edge_attr)
+    ]
 
     # (2, n_edges)
-    inner_edge_index = jnp.hstack(inner_edge_index)
-    inter_edge_index = jnp.hstack(inter_edge_index)
-    edge_index = jnp.hstack([inner_edge_index, inter_edge_index])
+    edge_index = jnp.hstack(
+      [jnp.hstack(inner_edge_index),
+       jnp.hstack(inter_edge_index)]
+    )
 
     # (n_edges, n_attr)
-    inner_edge_attr = jnp.vstack(inner_edge_attr)
-    inter_edge_attr = jnp.vstack(inter_edge_attr)
-    edges = jnp.vstack([inner_edge_attr, inter_edge_attr])
-
-    globals = MultiMeshGlobals(
-      **dict(n_inner_edges=n_inner_edges, n_inter_edges=n_inter_edges)
+    edges = jnp.vstack(
+      [jnp.vstack(inner_edge_attr),
+       jnp.vstack(inter_edge_attr)]
     )
+
+    # count nodes for each level
+    n_inner_nodes = jnp.array(self.sub_mesh_sizes)
+    n_inter_nodes = n_inner_nodes[:-1] + n_inner_nodes[1:]
+    n_node = jnp.hstack([n_inter_nodes, n_inner_nodes])
+
+    # combine edges from all level into a single tensor
+    n_inner_edges = jnp.array([e.shape[-1] for e in inner_edge_index])
+    n_inter_edges = jnp.array([e.shape[-1] for e in inter_edge_index])
+    n_edge = jnp.hstack([n_inter_edges, n_inner_edges])
+
+    # whether the subgraph is inter
+    # NOTE: this is redundant
+    globals = jnp.hstack([jnp.ones(self.level - 1),
+                          jnp.zeros(self.level)]).astype(bool)
 
     gt = jraph.GraphsTuple(
       nodes=nodes,
       edges=edges,
       senders=edge_index[0],
       receivers=edge_index[1],
-      n_node=len(nodes),
-      n_edge=len(edges),
+      n_node=n_node,
+      n_edge=n_edge,
       globals=globals,
     )
 
