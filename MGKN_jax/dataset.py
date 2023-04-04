@@ -84,7 +84,7 @@ def calc_multilevel_connectivity(
 class Normalizer:
 
   def __init__(self, x, pointwise: bool = False, eps: float = 1e-5):
-    if pointwise:
+    if pointwise:  # normalize across datasets
       self.mean = np.mean(x, 0)
       self.std = np.std(x, 0)
     else:
@@ -199,6 +199,9 @@ class ParametricEllipticalPDE:
     edge_data = self.train_in.coeff.normalized
     self.multi_mesh = RandomMultiMeshGenerator(cfg, node_data, edge_data)
 
+  def get_init_data(self) -> jraph.GraphsTuple:
+    return self.multi_mesh.sample(jax.random.PRNGKey(137), 0)
+
   def make_data_gen(self, cfg: TrainConfig):
     rng = jax.random.PRNGKey(cfg.rng_seed)
     key, rng = jax.random.split(rng)
@@ -247,7 +250,7 @@ class RandomMultiMeshGenerator:
     self.node_data = node_data
     self.edge_data = edge_data
 
-  def sample(self, key, data_idx: int):
+  def sample(self, key, data_idx: int) -> jraph.GraphsTuple:
     """sample non-overlapping multi level/resolution graph from the loaded grid."""
     # sample nodes
     perm = jax.random.permutation(key, self.n_grid_pts)
@@ -330,7 +333,7 @@ class RandomMultiMeshGenerator:
       receivers=receivers,
       n_node=n_node,
       n_edge=n_edge,
-      globals=jnp.array([[1]]),  # not used
+      globals=sampled_indices[0],
     )
 
     return gt

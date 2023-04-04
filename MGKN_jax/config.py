@@ -1,5 +1,6 @@
 from typing import Iterable, Literal, Tuple, Union, Optional, List
 
+import optax
 from ml_collections import ConfigDict
 from pydantic.dataclasses import dataclass
 
@@ -124,11 +125,18 @@ class TrainConfig:
 
   learning_rate: float = 0.1 / data_cfg.n_train
 
+  lr_decay: bool = False
+
   scheduler_step: int = 10
 
   scheduler_gamma: float = 0.8
 
   rng_seed: int = 137
+
+  batch_size: int = 1
+  """batching not supported yet"""
+
+  optimizer: optax.GradientTransformation = optax.adam
 
 
 def get_config() -> ConfigDict:

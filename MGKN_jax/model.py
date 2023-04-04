@@ -165,11 +165,3 @@ class MGKN(hk.Module):
       x[:self.finest_mesh_size]
     )
     return x
-
-  @hk.experimental.name_like("__call__")
-  def agg(self, data):
-    """placeholder"""
-    return 1
-
-  def init_for_multitransform(self):
-    return self.__call__, (self.__call__, self.agg)
