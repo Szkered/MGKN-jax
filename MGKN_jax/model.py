@@ -105,7 +105,7 @@ class MGKN(hk.Module):
     self.finest_mesh_size = cfg.mesh_cfg.sub_mesh_sizes[0]
 
     self.ker_widths = [
-      self.cfg.ker_width // (2**(l + 1)) for l in range(self.level)
+      self.cfg.finest_ker_width // (2**(l + 1)) for l in range(self.level)
     ]
 
   def __call__(self, data: jraph.GraphsTuple):
@@ -119,7 +119,7 @@ class MGKN(hk.Module):
       # DOWNWARD: K12, K23, K34 ...
       for l in range(self.level - 1):
         kernel_l = MLP(
-          [self.cfg.ker_in, self.ker_widths[l], width**2],
+          [self.ker_widths[l], width**2],
           self.cfg.mlp_cfg,
           name=f"K{l+1}{l+2}_{d}"
         )
@@ -133,7 +133,7 @@ class MGKN(hk.Module):
       for l in reversed(range(self.level)):
         # K55, K44, K33, ...
         kernel_l_ii = MLP(
-          [self.cfg.ker_in, self.ker_widths[l], self.ker_widths[l], width**2],
+          [self.ker_widths[l], self.ker_widths[l], width**2],
           self.cfg.mlp_cfg,
           name=f"K{l+1}{l+1}_{d}"
         )
@@ -145,7 +145,7 @@ class MGKN(hk.Module):
 
         if l < self.level - 1:  # from previous (coarser) level: K54, K43, K32, ...
           kernel_l_ji = MLP(
-            [self.cfg.ker_in, self.ker_widths[l], width**2],
+            [self.ker_widths[l], width**2],
             self.cfg.mlp_cfg,
             name=f"K{l+2}{l+1}_{d}"
           )
@@ -155,14 +155,15 @@ class MGKN(hk.Module):
             x, data.receivers['inter'][l], data.senders['inter'][l],
             data.edges['inter'][l]
           )
-
           x = jax.nn.relu(x)
 
-    x = MLP([self.cfg.ker_width], self.cfg.mlp_cfg, name="final")(
+    x = MLP(
+      [self.cfg.finest_ker_width, self.cfg.ker_out],
+      self.cfg.mlp_cfg,
+      name="final"
+    )(
       x[:self.finest_mesh_size]
     )
-    x = jax.nn.relu(x)
-    x = MLP([1], self.cfg.mlp_cfg, name="readout")(x)
     return x
 
   @hk.experimental.name_like("__call__")

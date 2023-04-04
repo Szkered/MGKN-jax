@@ -27,6 +27,7 @@ class MLPConfig:
 @dataclass(config=config)
 class NNConvConfig:
   width: int = 64
+  """size of hidden node embedding"""
 
   aggr: Literal["mean"] = "mean"
   """message aggregation method"""
@@ -41,16 +42,17 @@ class MeshConfig:
 
 @dataclass(config=config)
 class MGKNConfig:
-  ker_width: int = 256
+  finest_ker_width: int = 256
+  """size of node embedding of the finest resolution"""
 
   depth: int = 4
+  """number of v-cycles"""
 
   ker_in: int = 6
+  """size of input node features"""
 
-  in_width: int = 6
-  """node_features"""
-
-  out_width: int = 1
+  ker_out: int = 1
+  """size of output node features"""
 
   mesh_cfg: MeshConfig = MeshConfig()
 
