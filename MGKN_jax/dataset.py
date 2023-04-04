@@ -59,9 +59,12 @@ def calc_multilevel_connectivity(
 
   # edges within each level
   inner_dists = [pairwise_dist(g, g) for g in grid_samples]
+
+  offset = jnp.concatenate([jnp.array([0]), sub_mesh_sizes.cumsum()])
+
   inner_edge_index = [
     jnp.vstack(jnp.where(dist <= r)) + m
-    for dist, r, m in zip(inner_dists, inner_radii, sub_mesh_sizes)
+    for dist, r, m in zip(inner_dists, inner_radii, offset)
   ]  # (2, num_edges)
 
   # edges between levels
@@ -72,7 +75,7 @@ def calc_multilevel_connectivity(
   # NOTE: to get the up edges simply flip the down edges
   inter_edge_index = [
     jnp.vstack(jnp.where(dist <= r)) + jnp.array([[0], [m]])
-    for dist, r, m in zip(inter_dists, inter_radii, sub_mesh_sizes)
+    for dist, r, m in zip(inter_dists, inter_radii, offset)
   ]  # (2, num_edges)
 
   return inner_edge_index, inter_edge_index
@@ -290,41 +293,44 @@ class RandomMultiMeshGenerator:
       for e_idx, e_attr in zip(inter_edge_index, inter_edge_attr)
     ]
 
-    # (2, n_edges)
-    edge_index = jnp.hstack(
-      [jnp.hstack(inner_edge_index),
-       jnp.hstack(inter_edge_index)]
+    senders = dict(
+      inter=[i[0] for i in inter_edge_index],
+      inner=[i[0] for i in inner_edge_index]
+    )
+    receivers = dict(
+      inter=[i[1] for i in inter_edge_index],
+      inner=[i[1] for i in inner_edge_index]
     )
 
-    # (n_edges, n_attr)
-    edges = jnp.vstack(
-      [jnp.vstack(inner_edge_attr),
-       jnp.vstack(inter_edge_attr)]
+    edges = dict(
+      inter=inter_edge_attr,
+      inner=inner_edge_attr,
     )
 
     # count nodes for each level
     n_inner_nodes = jnp.array(self.sub_mesh_sizes)
     n_inter_nodes = n_inner_nodes[:-1] + n_inner_nodes[1:]
-    n_node = jnp.hstack([n_inter_nodes, n_inner_nodes])
+    n_node = dict(
+      inter=jnp.split(n_inter_nodes, self.level - 1),
+      inner=jnp.split(n_inner_nodes, self.level)
+    )
 
     # combine edges from all level into a single tensor
     n_inner_edges = jnp.array([e.shape[-1] for e in inner_edge_index])
     n_inter_edges = jnp.array([e.shape[-1] for e in inter_edge_index])
-    n_edge = jnp.hstack([n_inter_edges, n_inner_edges])
-
-    # whether the subgraph is inter
-    # NOTE: this is redundant
-    globals = jnp.hstack([jnp.ones(self.level - 1),
-                          jnp.zeros(self.level)]).astype(bool)
+    n_edge = dict(
+      inter=jnp.split(n_inter_edges, self.level - 1),
+      inner=jnp.split(n_inner_edges, self.level)
+    )
 
     gt = jraph.GraphsTuple(
       nodes=nodes,
       edges=edges,
-      senders=edge_index[0],
-      receivers=edge_index[1],
+      senders=senders,
+      receivers=receivers,
       n_node=n_node,
       n_edge=n_edge,
-      globals=globals,
+      globals=jnp.array([[1]]),  # not used
     )
 
     return gt

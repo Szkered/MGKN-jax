@@ -69,21 +69,23 @@ class NNConv(hk.Module):
       edge_attr: (num_edges, E)
       size: [num_nodes, num_nodes]
     """
+    n_segs = x.shape[0]
+
     # calculate message
     weight = self.nn(edge_attr)  # (num_edges, E')
     weight = weight.reshape(-1, self.cfg.width, self.cfg.width)
-    # i, j = (1, 0) if self.flow == 'source_to_target' else (0, 1)
     x_j = x[senders][:, None]  # (num_edges, 1, E)
     msgs = jnp.matmul(x_j, weight).squeeze(1)  # (num_edges, OC)
 
     # aggregate neighbours
     if self.cfg.aggr == "mean":
-      msg = jraph.segment_mean(msgs, receivers)
+      msg = jraph.segment_mean(msgs, receivers, n_segs)
     elif self.cfg.aggr == "sum":
-      msg = jraph.segment_sum(msgs, receivers)
+      msg = jraph.segment_sum(msgs, receivers, n_segs)
     else:
       raise NotImplementedError
 
+    # NOTE: Original impl: root_weight=False, bias=False
     updated_x = msg
 
     return updated_x
@@ -107,25 +109,23 @@ class MGKN(hk.Module):
     ]
 
   def __call__(self, data: jraph.GraphsTuple):
-
+    """
+    """
     width = self.cfg.nnconv_cfg.width
 
-    x = MLP([width], self.cfg.mlp_cfg)(data.nodes["inputs"])
+    x = MLP([width], self.cfg.mlp_cfg, name="first")(data.nodes["inputs"])
 
-    edge_idx_range = jnp.concatenate([jnp.zeros(1), data.n_edge.cumsum()])
-
-    for _ in range(self.cfg.depth):
+    for d in range(self.cfg.depth):
       # DOWNWARD: K12, K23, K34 ...
       for l in range(self.level - 1):
         kernel_l = MLP(
-          [self.cfg.ker_in, self.ker_widths[l], width**2], self.cfg.mlp_cfg
+          [self.cfg.ker_in, self.ker_widths[l], width**2],
+          self.cfg.mlp_cfg,
+          name=f"K{l+1}{l+2}_{d}"
         )
-        start, end = edge_idx_range[l:l + 2]
-        x = x + NNConv(
-          kernel_l, self.cfg.nnconv_cfg, name=f"K{l+1}{l+2}"
-        )(
-          x, data.senders[start:end], data.receivers[start:end],
-          data.edges[start:end]
+        x = x + NNConv(kernel_l, self.cfg.nnconv_cfg)(
+          x, data.senders['inter'][l], data.receivers['inter'][l],
+          data.edges['inter'][l]
         )
         x = jax.nn.relu(x)
 
@@ -134,34 +134,35 @@ class MGKN(hk.Module):
         # K55, K44, K33, ...
         kernel_l_ii = MLP(
           [self.cfg.ker_in, self.ker_widths[l], self.ker_widths[l], width**2],
-          self.cfg.mlp_cfg
+          self.cfg.mlp_cfg,
+          name=f"K{l+1}{l+1}_{d}"
         )
-        start, end = edge_idx_range[self.level + l:self.level + l + 2]
-        x = x + NNConv(
-          kernel_l_ii, self.cfg.nnconv_cfg, name=f"K{l+1}{l+1}"
-        )(
-          x, data.senders[start:end], data.receivers[start:end],
-          data.edges[start:end]
+        x = x + NNConv(kernel_l_ii, self.cfg.nnconv_cfg)(
+          x, data.senders['inner'][l], data.receivers['inner'][l],
+          data.edges['inner'][l]
         )
         x = jax.nn.relu(x)
 
-        if l > 0:  # from previous (coarser) level: K54, K43, K32, ...
+        if l < self.level - 1:  # from previous (coarser) level: K54, K43, K32, ...
           kernel_l_ji = MLP(
-            [self.cfg.ker_in, self.ker_widths[l], width**2], self.cfg.mlp_cfg
+            [self.cfg.ker_in, self.ker_widths[l], width**2],
+            self.cfg.mlp_cfg,
+            name=f"K{l+2}{l+1}_{d}"
           )
-          start, end = edge_idx_range[l:l + 2]
-          x = x + NNConv(
-            kernel_l_ji, self.cfg.nnconv_cfg, name=f"K{l+2}{l+1}"
-          )(
-            x, data.senders[start:end], data.receivers[start:end],
-            data.edges[start:end]
+          # NOTE: need to reverse the directly of the inter
+          # resolution level edge
+          x = x + NNConv(kernel_l_ji, self.cfg.nnconv_cfg)(
+            x, data.receivers['inter'][l], data.senders['inter'][l],
+            data.edges['inter'][l]
           )
 
           x = jax.nn.relu(x)
 
-    x = MLP([self.cfg.ker_width], self.cfg.mlp_cfg)(x[:self.finest_mesh_size])
+    x = MLP([self.cfg.ker_width], self.cfg.mlp_cfg, name="final")(
+      x[:self.finest_mesh_size]
+    )
     x = jax.nn.relu(x)
-    x = MLP([1], self.cfg.mlp_cfg)(x)  # readout
+    x = MLP([1], self.cfg.mlp_cfg, name="readout")(x)
     return x
 
   @hk.experimental.name_like("__call__")
