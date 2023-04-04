@@ -1,12 +1,14 @@
-from typing import Any, Dict, List, Optional, Tuple, Any
-import jraph
+from dataclasses import asdict, dataclass, fields
+from functools import partial
+from typing import Any, Dict, List, Tuple
 
 import h5py
 import jax
 import jax.numpy as jnp
+import jraph
 import numpy as np
 import scipy.io
-from dataclasses import dataclass, fields, asdict
+from jax import lax
 
 from MGKN_jax.config import DataConfig, TrainConfig
 from MGKN_jax.types import Array
@@ -84,6 +86,7 @@ def calc_multilevel_connectivity(
 class Normalizer:
 
   def __init__(self, x, pointwise: bool = False, eps: float = 1e-5):
+    self.pointwise = pointwise
     if pointwise:  # normalize across datasets
       self.mean = np.mean(x, 0)
       self.std = np.std(x, 0)
@@ -95,22 +98,6 @@ class Normalizer:
 
   def normalize(self, x):
     x = (x - self.mean) / (self.std + self.eps)
-    return x
-
-  def unnormalize(self, x, sample_idx=None):
-    if sample_idx is None:
-      std = self.std + self.eps  # n
-      mean = self.mean
-    else:
-      if len(self.mean.shape) == len(sample_idx[0].shape):
-        std = self.std[sample_idx] + self.eps  # batch*n
-        mean = self.mean[sample_idx]
-      if len(self.mean.shape) > len(sample_idx[0].shape):
-        std = self.std[:, sample_idx] + self.eps  # T*batch*n
-        mean = self.mean[:, sample_idx]
-
-    # x is in shape of batch*n or T*batch*n
-    x = (x * std) + mean
     return x
 
 
@@ -197,7 +184,9 @@ class ParametricEllipticalPDE:
       "outputs": self.train_out.normalized
     }
     edge_data = self.train_in.coeff.normalized
-    self.multi_mesh = RandomMultiMeshGenerator(cfg, node_data, edge_data)
+    self.multi_mesh = RandomMultiMeshGenerator(
+      cfg, node_data, edge_data, self.train_out
+    )
 
   def get_init_data(self) -> jraph.GraphsTuple:
     return self.multi_mesh.sample(jax.random.PRNGKey(137), 0)
@@ -217,7 +206,8 @@ class RandomMultiMeshGenerator:
   """Generate multi-level mesh for multi-level graph representation."""
 
   def __init__(
-    self, cfg: DataConfig, node_data: Dict[str, List[Array]], edge_data: Array
+    self, cfg: DataConfig, node_data: Dict[str, List[Array]], edge_data: Array,
+    train_out
   ):
     """
     Args:
@@ -231,6 +221,7 @@ class RandomMultiMeshGenerator:
     self.total_mesh_size = sub_mesh_sizes.sum()
     self.level = len(sub_mesh_sizes)
     self.n_dim = len(cfg.domain_boundary)
+    self.train_out = train_out
 
     assert len(cfg.mesh_size) == self.n_dim
 
@@ -333,7 +324,10 @@ class RandomMultiMeshGenerator:
       receivers=receivers,
       n_node=n_node,
       n_edge=n_edge,
-      globals=sampled_indices[0],
+      globals=(
+        self.train_out.mean[sampled_indices[0]],
+        self.train_out.std[sampled_indices[0]],
+      ),
     )
 
     return gt
