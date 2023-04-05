@@ -54,6 +54,9 @@ def calc_multilevel_connectivity(
       level, if the distance between them is less than this radii
     inter_radii: create an edge between a pair of nodes within the same
       level, if the distance between them is less than this radii
+
+  Returns:
+    inner_edge_index, inter_edge_index in (senders, receivers) format
   """
   pairwise_dist = lambda a, b: jnp.linalg.norm(a - b[:, None], axis=-1)
 
@@ -69,13 +72,15 @@ def calc_multilevel_connectivity(
 
   # edges between levels
   inter_dists = [
-    pairwise_dist(grid_samples[l], grid_samples[l + 1])
+    pairwise_dist(grid_samples[l], grid_samples[l + 1]).T
     for l in range(len(grid_samples) - 1)
   ]
-  # NOTE: to get the up edges simply flip the down edges
+  # We computes the down edges in (senders, receivers) format
+  # to get the up edges simply flip the down edges
   inter_edge_index = [
-    jnp.vstack(jnp.where(dist <= r)) + jnp.array([[0], [m]])
-    for dist, r, m in zip(inter_dists, inter_radii, offset)
+    jnp.vstack(jnp.where(dist <= r)) +
+    jnp.array([[offset[i]], [offset[i + 1]]])
+    for i, (dist, r) in enumerate(zip(inter_dists, inter_radii))
   ]  # (2, num_edges)
 
   return inner_edge_index, inter_edge_index

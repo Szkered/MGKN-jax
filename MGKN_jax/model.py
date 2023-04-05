@@ -72,18 +72,16 @@ class NNConv(hk.Module):
     n_segs = x.shape[0]
 
     # calculate message
-    weight = self.nn(edge_attr)  # (num_edges, E')
+    weight = self.nn(edge_attr)  # (num_edges, out_chan)
     weight = weight.reshape(-1, self.cfg.width, self.cfg.width)
-    x_j = x[senders][:, None]  # (num_edges, 1, E)
-    msgs = jnp.matmul(x_j, weight).squeeze(1)  # (num_edges, OC)
+    x_j = x[senders][:, None]  # (num_edges, 1, in_chan)
+    msgs = jnp.matmul(x_j, weight).squeeze(1)  # (num_edges, out_chan)
 
     # aggregate neighbours
     if self.cfg.aggr == "mean":
       msg = jraph.segment_mean(msgs, receivers, n_segs)
     elif self.cfg.aggr == "sum":
       msg = jraph.segment_sum(msgs, receivers, n_segs)
-    else:
-      raise NotImplementedError
 
     # NOTE: Original impl: root_weight=False, bias=False
     updated_x = msg

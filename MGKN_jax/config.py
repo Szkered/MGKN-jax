@@ -113,7 +113,7 @@ class NNConvConfig:
   width: int = 64
   """size of hidden node embedding"""
 
-  aggr: Literal["mean"] = "mean"
+  aggr: Literal["mean", "sum"] = "mean"
   """message aggregation method"""
 
 
