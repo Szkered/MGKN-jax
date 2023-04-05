@@ -58,7 +58,7 @@ def train(cfg: ConfigDict):
     y_norm = jnp.linalg.norm(y_unnorm, axis=-1)
     loss = jnp.sum(diff_norm / y_norm)
     mse = jnp.mean(jnp.square(y_pred - y))
-    return loss, mse
+    return loss, (mse, y_pred)
 
   @jax.jit
   def update(params, opt_state, data):
@@ -69,10 +69,12 @@ def train(cfg: ConfigDict):
     return params, opt_state, loss_val, mse
 
   data_gen = dataset.make_data_gen(cfg.train_cfg)
-  num_d = dataset.cfg.n_train * dataset.cfg.n_samples_per_train_data
+  n_train = dataset.cfg.n_train
   # go through one random multilevel graph at a time
   for epoch, data in enumerate(data_gen):
-    params, opt_state, train_l2, train_mse = update(params, opt_state, data)
+    params, opt_state, train_l2, aux = update(params, opt_state, data)
+    train_mse, y_pred = aux
     logging.info(
-      f"{epoch}| mse: {train_mse/num_d:.4f}, mean_l2: {train_l2/num_d:.4f}, l2: {train_l2:.4f}"
+      f"{epoch}| mse: {train_mse/n_train:.4f}, mean_l2: {train_l2/n_train:.4f}"
     )
+    breakpoint()

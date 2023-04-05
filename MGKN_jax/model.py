@@ -150,8 +150,10 @@ class MGKN(hk.Module):
           # NOTE: need to reverse the directly of the inter
           # resolution level edge
           x = x + NNConv(kernel_l_ji, self.cfg.nnconv_cfg)(
-            x, data.receivers['inter'][l], data.senders['inter'][l],
-            data.edges['inter'][l]
+            x,
+            data.receivers['inter'][l],
+            data.senders['inter'][l],
+            data.edges['inter'][l]  # TODO: transpose()
           )
           x = jax.nn.relu(x)
 
