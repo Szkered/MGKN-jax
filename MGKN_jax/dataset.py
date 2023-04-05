@@ -1,5 +1,4 @@
 from dataclasses import asdict, dataclass, fields
-from functools import partial
 from typing import Any, Dict, List, Tuple
 
 import h5py
@@ -8,9 +7,8 @@ import jax.numpy as jnp
 import jraph
 import numpy as np
 import scipy.io
-from jax import lax
 
-from MGKN_jax.config import DataConfig, TrainConfig
+from MGKN_jax.config import DataConfig, MultiMeshConfig, TrainConfig
 from MGKN_jax.types import Array
 
 
@@ -264,8 +262,8 @@ class RandomMultiMeshGenerator:
 
     # calculate connectivity
     inner_edge_index, inter_edge_index = calc_multilevel_connectivity(
-      self.sub_mesh_sizes, grid_samples, self.cfg.inner_radii,
-      self.cfg.inter_radii
+      self.sub_mesh_sizes, grid_samples, self.cfg.mesh_cfg.inner_radii,
+      self.cfg.mesh_cfg.inter_radii
     )
 
     # edge attributes, which is grid_point + aux_edge_data

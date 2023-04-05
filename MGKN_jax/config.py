@@ -1,9 +1,93 @@
-from typing import Literal, Tuple
+from typing import Iterable, Literal, Tuple, Union
 
 from ml_collections import ConfigDict
 from pydantic.dataclasses import dataclass
 
 config = dict(validate_assignment=True)
+
+
+@dataclass(config=config)
+class MultiMeshConfig:
+
+  sub_mesh_sizes: Tuple = (2400, 1600, 400, 100, 25)
+  """mesh sizes for each resolution level, ordering from finest to coarsest"""
+
+  inner_radii = [
+    0.5 / 8 * 1.41,
+    0.5 / 8,
+    0.5 / 4,
+    0.5 / 2,
+    0.5,
+  ]
+  inter_radii = [
+    0.5 / 8 * 1.1,
+    0.5 / 8 * 1.41,
+    0.5 / 4 * 1.41,
+    0.5 / 2 * 1.41,
+  ]
+  """Radii for constructing the multilevel mesh"""
+
+
+@dataclass(config=config)
+class MultiMeshConfigS1:
+  sub_mesh_sizes: Tuple = (400, 100, 25)
+  """mesh sizes for each resolution level, ordering from finest to coarsest"""
+
+  inner_radii = [
+    0.5 / 4,
+    0.5 / 2,
+    0.5,
+  ]
+  inter_radii = [
+    0.5 / 4 * 1.41,
+    0.5 / 2 * 1.41,
+  ]
+  """Radii for constructing the multilevel mesh"""
+
+
+@dataclass(config=config)
+class MultiMeshConfigS2:
+  sub_mesh_sizes: Tuple = (100, 25)
+  """mesh sizes for each resolution level, ordering from finest to coarsest"""
+
+  inner_radii = [
+    0.5 / 2,
+    0.5,
+  ]
+  inter_radii = [
+    0.5 / 2 * 1.41,
+  ]
+  """Radii for constructing the multilevel mesh"""
+
+
+MeshConfig = Union[MultiMeshConfig, MultiMeshConfigS1, MultiMeshConfigS2]
+
+
+@dataclass(config=config)
+class DataConfig:
+  train_path: str = 'data/piececonst_r241_N1024_smooth1.mat'
+
+  test_path: str = 'data/piececonst_r241_N1024_smooth2.mat'
+
+  n_train: int = 100
+
+  n_test: int = 100
+
+  n_samples_per_train_data: int = 1
+
+  res: int = 1
+  """resolution of grid"""
+
+  domain_boundary = ((0, 1), (0, 1))
+  """boundary of domain"""
+
+  grid_size_per_dim: int = 241
+  """grid size per dimension. Assuming square domain"""
+
+  mesh_size = [(grid_size_per_dim - 1) // res + 1] * len(domain_boundary)
+  """total number of grid points"""
+
+  mesh_cfg: MeshConfig = MultiMeshConfigS2()
 
 
 @dataclass(config=config)
@@ -34,13 +118,6 @@ class NNConvConfig:
 
 
 @dataclass(config=config)
-class MeshConfig:
-
-  sub_mesh_sizes: Tuple = (2400, 1600, 400, 100, 25)
-  """mesh sizes for each resolution level, ordering from finest to coarsest"""
-
-
-@dataclass(config=config)
 class MGKNConfig:
   finest_ker_width: int = 256
   """size of node embedding of the finest resolution"""
@@ -54,66 +131,11 @@ class MGKNConfig:
   ker_out: int = 1
   """size of output node features"""
 
-  mesh_cfg: MeshConfig = MeshConfig()
+  mesh_cfg: MeshConfig = MultiMeshConfigS2()
 
   mlp_cfg: MLPConfig = MLPConfig()
 
   nnconv_cfg: NNConvConfig = NNConvConfig()
-
-
-# @dataclass(config=config)
-# class StandardOptimizerConfig:
-#   name: Literal["adam", "rmsprop_momentum", "sgd"] = "adam"
-
-#   learning_rate: float = 1e-3
-
-#   lr_schedule: Union[InverseLRScheduleConfig,
-#                      ConstantLRSchedule] = InverseLRScheduleConfig()
-#   """Schedule for the learning rate decay"""
-
-#   scaled_modules: Optional[List[str]] = None
-#   """List of parameters for which the learning rate is being scaled."""
-
-#   scale_lr = 1.0
-#   """Factor which to apply to the learning rates of specified modules"""
-
-# @dataclass(config=config)
-# class OptimizationConfig:
-
-#   optimizer: StandardOptimizerConfig = StandardOptimizerConfig()
-
-
-@dataclass(config=config)
-class DataConfig:
-  train_path: str = 'data/piececonst_r241_N1024_smooth1.mat'
-
-  test_path: str = 'data/piececonst_r241_N1024_smooth2.mat'
-
-  n_train: int = 100
-
-  n_test: int = 100
-
-  n_samples_per_train_data: int = 1
-
-  res: int = 1
-  """resolution of grid"""
-
-  domain_boundary = ((0, 1), (0, 1))
-  """boundary of domain"""
-
-  grid_size_per_dim = 241
-  """grid size per dimension. Assuming square domain"""
-
-  mesh_size = [(grid_size_per_dim - 1) // res + 1] * len(domain_boundary)
-  """total number of grid points"""
-
-  inner_radii = [0.5 / 8 * 1.41, 0.5 / 8, 0.5 / 4, 0.5 / 2, 0.5]
-  inter_radii = [0.5 / 8 * 1.1, 0.5 / 8 * 1.41, 0.5 / 4 * 1.41, 0.5 / 2 * 1.41]
-  """Radii for constructing the multilevel mesh.
-  NOTE: this is the default value for the 241 dataset
-  """
-
-  mesh_cfg: MeshConfig = MeshConfig()
 
 
 @dataclass(config=config)
@@ -124,7 +146,7 @@ class TrainConfig:
 
   learning_rate: float = 0.1 / data_cfg.n_train
 
-  lr_decay: bool = False
+  lr_decay: bool = True
 
   scheduler_step: int = 10
 
@@ -136,6 +158,10 @@ class TrainConfig:
   """batching not supported yet"""
 
   optimizer: Literal["adam", "sgd"] = "adam"
+
+  scheduler_step: int = 10
+
+  scheduler_gamma: float = 0.8
 
 
 def get_config() -> ConfigDict:

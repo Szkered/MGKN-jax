@@ -2,6 +2,7 @@ import haiku as hk
 import jax
 import jax.numpy as jnp
 import optax
+from absl import logging
 from ml_collections import ConfigDict
 
 from MGKN_jax.config import TrainConfig
@@ -12,16 +13,11 @@ from MGKN_jax.model import MGKN
 def get_optimizer(cfg: TrainConfig):
   optimizer_kwargs = dict(learning_rate=cfg.learning_rate)
   if cfg.lr_decay:
-    total_steps = cfg.data_cfg.n_train / cfg.batch_size * cfg.epochs
-
-    # scheduler_step = 10
-    # scheduler_gamma = 0.8
-    scheduler = optax.piecewise_constant_schedule(
-      init_value=cfg.learning_rate,
-      boundaries_and_scales={
-        int(total_steps * 0.5): 0.5,
-        int(total_steps * 0.75): 0.5
-      }
+    scheduler = optax.exponential_decay(
+      cfg.learning_rate,
+      cfg.scheduler_step,
+      cfg.scheduler_gamma,
+      staircase=True
     )
     optimizer_kwargs["learning_rate"] = scheduler
 
