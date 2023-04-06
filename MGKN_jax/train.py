@@ -40,6 +40,8 @@ def train(cfg: ConfigDict):
   # batch = jraph.batch([data_init, data_init2])
   # breakpoint()
 
+  data_gen = dataset.make_data_gen(cfg.train_cfg)
+
   # init model
   model = hk.transform(lambda x: MGKN(cfg.mgkn_cfg)(x))
   rng = jax.random.PRNGKey(cfg.train_cfg.rng_seed)
@@ -87,7 +89,6 @@ def train(cfg: ConfigDict):
 
   writer = tb.SummaryWriter("logs")
 
-  data_gen = dataset.make_data_gen(cfg.train_cfg)
   n_data_per_epoch = (
     dataset.cfg.n_train * dataset.cfg.n_samples_per_train_data
   )

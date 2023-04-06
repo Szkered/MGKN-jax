@@ -89,6 +89,11 @@ class DataConfig:
 
   mesh_cfg: MeshConfig = MultiMeshConfigS2()
 
+  static_grids: bool = True
+
+  rng_seed: int = 137
+  """TODO: move this"""
+
 
 @dataclass(config=config)
 class MLPConfig:
