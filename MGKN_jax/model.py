@@ -118,6 +118,7 @@ class MGKN(hk.Module):
 
     x = MLP([width], self.cfg.mlp_cfg, name="first")(data.nodes["inputs"])
 
+    # TODO: only update necessary nodes to increase efficiency
     for d in range(self.cfg.depth):
       # DOWNWARD: K12, K23, K34 ...
       for l in range(self.level - 1):

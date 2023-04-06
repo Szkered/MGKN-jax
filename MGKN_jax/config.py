@@ -148,6 +148,8 @@ class TrainConfig:
 
   lr_decay: bool = True
 
+  l2_reg: float = 5e-4
+
   scheduler_step: int = 10 * data_cfg.n_train
   """scheduler step in epochs"""
 
@@ -160,10 +162,6 @@ class TrainConfig:
   """batching not supported yet"""
 
   optimizer: Literal["adam", "sgd"] = "adam"
-
-  scheduler_step: int = 10
-
-  scheduler_gamma: float = 0.8
 
 
 def get_config() -> ConfigDict:

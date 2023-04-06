@@ -58,6 +58,10 @@ def train(cfg: ConfigDict):
   optimizer = get_optimizer(cfg.train_cfg)
   opt_state = optimizer.init(params)
 
+  def add_l2_regularization(grads, params, l2_reg_weight):
+    l2_grads = jax.tree_map(lambda p: l2_reg_weight * p, params)
+    return jax.tree_multimap(lambda g, l2g: g + l2g, grads, l2_grads)
+
   def loss_fn(params, data):
     y_pred = model.apply(params, None, data)  # (n_grid_pts, 1)
     y_pred = jnp.squeeze(y_pred)
@@ -76,6 +80,7 @@ def train(cfg: ConfigDict):
   def update(params, opt_state, data):
     loss = lambda params: loss_fn(params, data)
     (loss_val, mse), grad = jax.value_and_grad(loss, has_aux=True)(params)
+    grad = add_l2_regularization(grad, params, cfg.train_cfg.l2_reg)
     updates, opt_state = optimizer.update(grad, opt_state)
     params = optax.apply_updates(params, updates)
     return params, opt_state, loss_val, mse
@@ -95,7 +100,7 @@ def train(cfg: ConfigDict):
     train_l2 += train_l2_i
     if train_idx == n_train - 1:  # end of epoch
       logging.info(
-        f"{epoch}:{step}| mse: {train_mse/n_train:.4f}, l2: {train_l2/n_train:.4f}"
+        f"{epoch}:{step}| mse: {train_mse/n_train:.6f}, l2: {train_l2/n_train:.6f}"
       )
       writer.add_scalar("l2", train_l2 / n_train, step)
       writer.add_scalar("mse", train_mse / n_train, step)
