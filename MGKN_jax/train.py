@@ -59,8 +59,8 @@ def train(cfg: ConfigDict):
   opt_state = optimizer.init(params)
 
   def add_l2_regularization(grads, params, l2_reg_weight):
-    l2_grads = jax.tree_map(lambda p: l2_reg_weight * p, params)
-    return jax.tree_multimap(lambda g, l2g: g + l2g, grads, l2_grads)
+    l2_grads = jax.tree_util.tree_map(lambda p: l2_reg_weight * p, params)
+    return jax.tree_util.tree_map(lambda g, l2g: g + l2g, grads, l2_grads)
 
   def loss_fn(params, data):
     y_pred = model.apply(params, None, data)  # (n_grid_pts, 1)
@@ -88,21 +88,22 @@ def train(cfg: ConfigDict):
   writer = tb.SummaryWriter("logs")
 
   data_gen = dataset.make_data_gen(cfg.train_cfg)
-  n_train = dataset.cfg.n_train
+  n_data_per_epoch = (
+    dataset.cfg.n_train * dataset.cfg.n_samples_per_train_data
+  )
   # go through one random multilevel graph at a time
-  train_mse = 0.0
-  train_l2 = 0.0
-  for step, data in enumerate(data_gen):
-    epoch, train_idx = divmod(step, n_train)
-    params, opt_state, train_l2_i, aux = update(params, opt_state, data)
-    train_mse_i, y_pred = aux
-    train_mse += train_mse_i
-    train_l2 += train_l2_i
-    if train_idx == n_train - 1:  # end of epoch
-      logging.info(
-        f"{epoch}:{step}| mse: {train_mse/n_train:.6f}, l2: {train_l2/n_train:.6f}"
-      )
-      writer.add_scalar("l2", train_l2 / n_train, step)
-      writer.add_scalar("mse", train_mse / n_train, step)
-      train_mse = 0.0
-      train_l2 = 0.0
+  for epoch in range(cfg.train_cfg.epochs):
+    train_mse = 0.0
+    train_l2 = 0.0
+    for _ in range(n_data_per_epoch):
+      data = next(data_gen)
+      params, opt_state, train_l2_i, aux = update(params, opt_state, data)
+      train_mse_i, y_pred = aux
+      train_mse += train_mse_i
+      train_l2 += train_l2_i
+
+    train_mse /= n_data_per_epoch
+    train_l2 /= n_data_per_epoch
+    logging.info(f"{epoch}| mse: {train_mse:.6f}, l2: {train_l2:.6f}")
+    writer.add_scalar("l2", train_l2, epoch)
+    writer.add_scalar("mse", train_mse, epoch)
