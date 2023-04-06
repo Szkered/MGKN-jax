@@ -166,6 +166,8 @@ class TrainConfig:
   batch_size: int = 1
   """batching not supported yet"""
 
+  num_shuffle_batches: int = 10
+
   optimizer: Literal["adam", "sgd"] = "adam"
 
 

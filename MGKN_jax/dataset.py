@@ -1,6 +1,7 @@
+import itertools
+import random
 from dataclasses import asdict, dataclass, fields
-from tqdm import tqdm
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Tuple, TypeVar
 
 import h5py
 import jax
@@ -8,10 +9,12 @@ import jax.numpy as jnp
 import jraph
 import numpy as np
 import scipy.io
+from tqdm import tqdm
 
-from MGKN_jax.config import DataConfig, MultiMeshConfig, TrainConfig
+from MGKN_jax.config import DataConfig, TrainConfig
 
 Array = np.ndarray
+_T = TypeVar('_T')
 
 
 def load_file(file_path: str) -> Tuple[Any, bool]:
@@ -120,6 +123,19 @@ class ParametricEllipticalPDEInput:
   """a_grady"""
 
 
+def _repeat_and_shuffle(iterable: Iterable[_T], *,
+                        buffer_size: int) -> Iterator[_T]:
+  """Infinitely repeats, caches, and shuffles data from `iterable`."""
+  ds = itertools.cycle(iterable)
+  buffer = [next(ds) for _ in range(buffer_size)]
+  random.shuffle(buffer)
+  for item in ds:
+    idx = random.randint(0, buffer_size - 1)  # Inclusive.
+    result = buffer[idx]
+    buffer[idx] = item
+    yield result
+
+
 class ParametricEllipticalPDE:
   """
   Load Parametric Elliptical PDE data on a grid.
@@ -195,35 +211,43 @@ class ParametricEllipticalPDE:
     self.n_data_per_epoch = self.cfg.n_train * self.cfg.n_samples_per_train_data
     if cfg.static_grids:
       rng = jax.random.PRNGKey(cfg.rng_seed)
-      self.samples = []
+      self.sampled_multimesh = []
       for data_idx in tqdm(range(self.cfg.n_train)):
         for _ in range(self.cfg.n_samples_per_train_data):
           key, rng = jax.random.split(rng)
           sample = self.multi_mesh.sample(key, data_idx)
-          self.samples.append(sample)
+          self.sampled_multimesh.append(sample)
 
-  def get_init_data(self) -> jraph.GraphsTuple:
-    return self.multi_mesh.sample(jax.random.PRNGKey(137), 0)
+  # def get_init_data(self) -> jraph.GraphsTuple:
+  #   return self.multi_mesh.sample(jax.random.PRNGKey(137), 0)
 
   def make_data_gen(self, cfg: TrainConfig):
-    rng = jax.random.PRNGKey(cfg.rng_seed)
+    ds = _repeat_and_shuffle(
+      self.sampled_multimesh,
+      buffer_size=cfg.batch_size * cfg.num_shuffle_batches
+    )
+    while True:
+      yield next(ds)
 
-    if self.cfg.static_grids:
-      for _ in range(cfg.epochs):
-        key, rng = jax.random.split(rng)
-        data_idx_perms = jax.random.permutation(key, self.n_data_per_epoch)
-        for data_idx in data_idx_perms:
-          yield self.samples[data_idx]
+  # def make_data_gen(self, cfg: TrainConfig):
+  #   rng = jax.random.PRNGKey(cfg.rng_seed)
 
-    else:
-      for _ in range(cfg.epochs):
-        key, rng = jax.random.split(rng)
-        data_idx_perms = jax.random.permutation(key, self.cfg.n_train)
-        # for data_idx in range(self.cfg.n_train):
-        for data_idx in data_idx_perms:
-          for _ in range(self.cfg.n_samples_per_train_data):
-            key, rng = jax.random.split(rng)
-            yield self.multi_mesh.sample(key, data_idx)
+  #   if self.cfg.static_grids:
+  #     for _ in range(cfg.epochs):
+  #       key, rng = jax.random.split(rng)
+  #       data_idx_perms = jax.random.permutation(key, self.n_data_per_epoch)
+  #       for data_idx in data_idx_perms:
+  #         yield self.samples[data_idx]
+
+  #   else:
+  #     for _ in range(cfg.epochs):
+  #       key, rng = jax.random.split(rng)
+  #       data_idx_perms = jax.random.permutation(key, self.cfg.n_train)
+  #       # for data_idx in range(self.cfg.n_train):
+  #       for data_idx in data_idx_perms:
+  #         for _ in range(self.cfg.n_samples_per_train_data):
+  #           key, rng = jax.random.split(rng)
+  #           yield self.multi_mesh.sample(key, data_idx)
 
 
 class RandomMultiMeshGenerator:
