@@ -8,6 +8,7 @@ from ml_collections import ConfigDict
 from MGKN_jax.config import TrainConfig
 from MGKN_jax.dataset import ParametricEllipticalPDE
 from MGKN_jax.model import MGKN
+import tensorboardX as tb
 
 
 def get_optimizer(cfg: TrainConfig):
@@ -44,6 +45,11 @@ def train(cfg: ConfigDict):
   rng = jax.random.PRNGKey(cfg.train_cfg.rng_seed)
   params = model.init(rng, data_init)
 
+  # # viz
+  # z = jax.xla_computation(model.apply)(params, None, data_init)
+  # with open("t.dot", "w") as f:
+  #   f.write(z.as_hlo_dot_graph())
+
   optimizer = get_optimizer(cfg.train_cfg)
   opt_state = optimizer.init(params)
 
@@ -68,6 +74,8 @@ def train(cfg: ConfigDict):
     params = optax.apply_updates(params, updates)
     return params, opt_state, loss_val, mse
 
+  writer = tb.SummaryWriter("logs")
+
   data_gen = dataset.make_data_gen(cfg.train_cfg)
   n_train = dataset.cfg.n_train
   # go through one random multilevel graph at a time
@@ -75,6 +83,9 @@ def train(cfg: ConfigDict):
     params, opt_state, train_l2, aux = update(params, opt_state, data)
     train_mse, y_pred = aux
     logging.info(
-      f"{epoch}| mse: {train_mse/n_train:.4f}, mean_l2: {train_l2/n_train:.4f}"
+      f"{epoch}| mse: {train_mse/n_train:.4f}, l2: {train_l2/n_train:.4f}"
     )
     breakpoint()
+
+    writer.add_scalar("l2", train_l2 / n_train, epoch)
+    writer.add_scalar("mse", train_mse / n_train, epoch)

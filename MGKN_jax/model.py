@@ -26,9 +26,11 @@ class MLP(hk.Module):
       tanh=jnp.tanh, silu=jax.nn.silu, elu=jax.nn.elu, relu=jax.nn.relu
     )[cfg.activation]
     self.init_w = hk.initializers.VarianceScaling(
-      1.0, cfg.init_weights_scale, cfg.init_weights_distribution
+      1.0, cfg.init_weights_mode, cfg.init_weights_distribution
     )
-    self.init_b = hk.initializers.TruncatedNormal(cfg.init_bias_scale)
+    self.init_b = hk.initializers.VarianceScaling(
+      1.0, cfg.init_bias_mode, cfg.init_bias_distribution
+    )
 
   def __call__(self, x):
     for i, output_size in enumerate(self.output_sizes):
@@ -147,13 +149,12 @@ class MGKN(hk.Module):
             self.cfg.mlp_cfg,
             name=f"K{l+2}{l+1}_{d}"
           )
-          # NOTE: need to reverse the directly of the inter
-          # resolution level edge
+          # NOTE: To get up edge, flip the down edge
+          # (x0,y0), (x1,y1), (a0,a1) -> (x1,y1), (x0,y0), (a1,a0)
+          swap_end_pt = np.array([2, 3, 0, 1, 6, 4])
           x = x + NNConv(kernel_l_ji, self.cfg.nnconv_cfg)(
-            x,
-            data.receivers['inter'][l],
-            data.senders['inter'][l],
-            data.edges['inter'][l]  # TODO: transpose()
+            x, data.receivers['inter'][l], data.senders['inter'][l],
+            data.edges['inter'][l][:, swap_end_pt]
           )
           x = jax.nn.relu(x)
 

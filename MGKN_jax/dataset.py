@@ -265,6 +265,8 @@ class RandomMultiMeshGenerator:
     outputs = self.node_data["outputs"][data_idx, sampled_indices[0]]
     nodes = dict(inputs=inputs, outputs=outputs)
 
+    edge_sample = self.edge_data[data_idx, sampled_indices_all]
+
     # calculate connectivity
     inner_edge_index, inter_edge_index = calc_multilevel_connectivity(
       self.sub_mesh_sizes, grid_samples, self.cfg.mesh_cfg.inner_radii,
@@ -273,20 +275,20 @@ class RandomMultiMeshGenerator:
 
     # edge attributes, which is grid_point + aux_edge_data
     inner_edge_attr = [
-      self.grid[e_idx.T].reshape(-1, 2 * self.n_dim)
+      grid_sample_all[e_idx.T].reshape(-1, 2 * self.n_dim)
       for e_idx in inner_edge_index
     ]
     inner_edge_attr = [
-      jnp.concatenate([e_attr, self.edge_data[data_idx][e_idx.T]], axis=-1)
+      jnp.concatenate([e_attr, edge_sample[e_idx.T]], axis=-1)
       for e_idx, e_attr in zip(inner_edge_index, inner_edge_attr)
     ]
 
     inter_edge_attr = [
-      self.grid[e_idx.T].reshape(-1, 2 * self.n_dim)
+      grid_sample_all[e_idx.T].reshape(-1, 2 * self.n_dim)
       for e_idx in inter_edge_index
     ]
     inter_edge_attr = [
-      jnp.concatenate([e_attr, self.edge_data[data_idx][e_idx.T]], axis=-1)
+      jnp.concatenate([e_attr, edge_sample[e_idx.T]], axis=-1)
       for e_idx, e_attr in zip(inter_edge_index, inter_edge_attr)
     ]
 

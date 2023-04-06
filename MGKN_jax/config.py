@@ -94,18 +94,21 @@ class DataConfig:
 class MLPConfig:
   activation: Literal["tanh", "silu", "elu", "relu"] = "relu"
 
-  init_bias_scale: float = 0.0
-
-  init_weights_scale: Literal["fan_in", "fan_out", "fan_avg"] = "fan_avg"
+  init_weights_mode: Literal["fan_in", "fan_out", "fan_avg"] = "fan_in"
 
   init_weights_distribution: Literal["normal", "truncated_normal",
                                      "uniform"] = "uniform"
+
+  init_bias_mode: Literal["fan_in", "fan_out", "fan_avg"] = "fan_in"
+
+  init_bias_distribution: Literal["normal", "truncated_normal",
+                                  "uniform"] = "uniform"
 
   residual: bool = False
 
   linear_out: bool = True
 
-  output_bias: bool = False
+  output_bias: bool = True
 
 
 @dataclass(config=config)

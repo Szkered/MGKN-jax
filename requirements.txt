@@ -10,3 +10,4 @@ scipy
 ml-collections
 pydantic
 jraph
+tensorboardX
