@@ -155,7 +155,7 @@ class MGKN(hk.Module):
           )
           # NOTE: To get up edge, flip the down edge
           # (x0,y0), (x1,y1), (a0,a1) -> (x1,y1), (x0,y0), (a1,a0)
-          swap_end_pt = np.array([2, 3, 0, 1, 6, 4])
+          swap_end_pt = np.array([2, 3, 0, 1, 5, 4])
           x = x + NNConv(kernel_l_ji, self.cfg.nnconv_cfg)(
             x, data.receivers['inter'][l], data.senders['inter'][l],
             data.edges['inter'][l][:, swap_end_pt]
