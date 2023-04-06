@@ -25,12 +25,15 @@ class MLP(hk.Module):
     self.activation = dict(
       tanh=jnp.tanh, silu=jax.nn.silu, elu=jax.nn.elu, relu=jax.nn.relu
     )[cfg.activation]
+
+    # default init of torch.nn.Linear
+    # self.init_w = hk.initializers.UniformScaling(1.0)
+    # self.init_b = hk.initializers.UniformScaling(1.0)
+
     self.init_w = hk.initializers.VarianceScaling(
-      1.0, cfg.init_weights_mode, cfg.init_weights_distribution
+      1.0, cfg.init_weights_scale, cfg.init_weights_distribution
     )
-    self.init_b = hk.initializers.VarianceScaling(
-      1.0, cfg.init_bias_mode, cfg.init_bias_distribution
-    )
+    self.init_b = hk.initializers.TruncatedNormal(cfg.init_bias_scale)
 
   def __call__(self, x):
     for i, output_size in enumerate(self.output_sizes):

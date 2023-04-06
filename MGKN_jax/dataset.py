@@ -9,7 +9,8 @@ import numpy as np
 import scipy.io
 
 from MGKN_jax.config import DataConfig, MultiMeshConfig, TrainConfig
-from MGKN_jax.types import Array
+
+Array = np.ndarray
 
 
 def load_file(file_path: str) -> Tuple[Any, bool]:

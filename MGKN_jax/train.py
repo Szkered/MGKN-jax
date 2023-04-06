@@ -45,6 +45,11 @@ def train(cfg: ConfigDict):
   rng = jax.random.PRNGKey(cfg.train_cfg.rng_seed)
   params = model.init(rng, data_init)
 
+  # check input shapes
+  # logging.info(data.nodes['inputs'].shape)
+  # logging.info(data_init.n_edge)
+  # breakpoint()
+
   # # viz
   # z = jax.xla_computation(model.apply)(params, None, data_init)
   # with open("t.dot", "w") as f:
@@ -54,10 +59,11 @@ def train(cfg: ConfigDict):
   opt_state = optimizer.init(params)
 
   def loss_fn(params, data):
-    y_pred = model.apply(params, None, data)
-    y = data.nodes["outputs"]
-    mean, std = data.globals
-    unnormalize = lambda y: (y * std) + mean
+    y_pred = model.apply(params, None, data)  # (n_grid_pts, 1)
+    y_pred = jnp.squeeze(y_pred)
+    y = data.nodes["outputs"]  # (n_grid_pts)
+    mean, std = data.globals  # (n_grid_pts)
+    unnormalize = lambda y: (y * (std + 1e-5)) + mean
     y_pred_unnorm = unnormalize(y_pred)
     y_unnorm = unnormalize(y)
     diff_norm = jnp.linalg.norm(y_pred_unnorm - y_unnorm, axis=-1)
@@ -79,13 +85,19 @@ def train(cfg: ConfigDict):
   data_gen = dataset.make_data_gen(cfg.train_cfg)
   n_train = dataset.cfg.n_train
   # go through one random multilevel graph at a time
-  for epoch, data in enumerate(data_gen):
-    params, opt_state, train_l2, aux = update(params, opt_state, data)
-    train_mse, y_pred = aux
-    logging.info(
-      f"{epoch}| mse: {train_mse/n_train:.4f}, l2: {train_l2/n_train:.4f}"
-    )
-    breakpoint()
-
-    writer.add_scalar("l2", train_l2 / n_train, epoch)
-    writer.add_scalar("mse", train_mse / n_train, epoch)
+  train_mse = 0.0
+  train_l2 = 0.0
+  for step, data in enumerate(data_gen):
+    epoch, train_idx = divmod(step, n_train)
+    params, opt_state, train_l2_i, aux = update(params, opt_state, data)
+    train_mse_i, y_pred = aux
+    train_mse += train_mse_i
+    train_l2 += train_l2_i
+    if train_idx == n_train - 1:  # end of epoch
+      logging.info(
+        f"{epoch}:{step}| mse: {train_mse/n_train:.4f}, l2: {train_l2/n_train:.4f}"
+      )
+      writer.add_scalar("l2", train_l2 / n_train, step)
+      writer.add_scalar("mse", train_mse / n_train, step)
+      train_mse = 0.0
+      train_l2 = 0.0

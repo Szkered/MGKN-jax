@@ -94,15 +94,12 @@ class DataConfig:
 class MLPConfig:
   activation: Literal["tanh", "silu", "elu", "relu"] = "relu"
 
-  init_weights_mode: Literal["fan_in", "fan_out", "fan_avg"] = "fan_in"
+  init_bias_scale: float = 0.0
+
+  init_weights_scale: Literal["fan_in", "fan_out", "fan_avg"] = "fan_avg"
 
   init_weights_distribution: Literal["normal", "truncated_normal",
                                      "uniform"] = "uniform"
-
-  init_bias_mode: Literal["fan_in", "fan_out", "fan_avg"] = "fan_in"
-
-  init_bias_distribution: Literal["normal", "truncated_normal",
-                                  "uniform"] = "uniform"
 
   residual: bool = False
 
@@ -151,9 +148,11 @@ class TrainConfig:
 
   lr_decay: bool = True
 
-  scheduler_step: int = 10
+  scheduler_step: int = 10 * data_cfg.n_train
+  """scheduler step in epochs"""
 
   scheduler_gamma: float = 0.8
+  """decay rate"""
 
   rng_seed: int = 137
 
