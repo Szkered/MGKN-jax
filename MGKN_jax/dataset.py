@@ -197,13 +197,15 @@ class ParametricEllipticalPDE:
 
   def make_data_gen(self, cfg: TrainConfig):
     rng = jax.random.PRNGKey(cfg.rng_seed)
-    key, rng = jax.random.split(rng)
+    key0, rng = jax.random.split(rng)
 
     for _ in range(cfg.epochs):
-
-      for i in range(self.cfg.n_train):
+      key, rng = jax.random.split(rng)
+      data_idx_perms = jax.random.permutation(key, self.cfg.n_train)
+      # for data_idx in range(self.cfg.n_train):
+      for data_idx in data_idx_perms:
         for _ in range(self.cfg.n_samples_per_train_data):
-          yield self.multi_mesh.sample(key, i)
+          yield self.multi_mesh.sample(key0, data_idx)
 
 
 class RandomMultiMeshGenerator:
