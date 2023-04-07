@@ -1,5 +1,7 @@
 # MGKN-jax
 
+`jax` implementation of [(MGKN) Multipole Graph Neural Operator for Parametric Partial Differential Equations](https://arxiv.org/abs/2006.09535). [Original implementation in pytorch](https://github.com/neuraloperator/graph-pde)
+
 ## Download Dataset
 
 ```bash
