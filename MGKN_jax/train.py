@@ -71,6 +71,11 @@ def train(cfg: ConfigDict, use_tb: bool):
     return jax.tree_util.tree_map(lambda g, l2g: g + l2g, grads, l2_grads)
 
   @jax.jit
+  def evalulate(state: TrainingState, data: Data):
+    loss, mse = loss_fn.apply(state.params, rng, data)
+    return loss, mse
+
+  @jax.jit
   def update(state: TrainingState, data: Data):
     rng, new_rng = jax.random.split(state.rng)
     loss_and_grad_fn = jax.value_and_grad(loss_fn.apply, has_aux=True)
@@ -110,9 +115,7 @@ def train(cfg: ConfigDict, use_tb: bool):
   if use_tb:
     writer = tb.SummaryWriter("logs")
 
-  n_data_per_epoch = (
-    dataset.cfg.n_train * dataset.cfg.n_samples_per_train_data
-  )
+  n_data_per_epoch = dataset.cfg.n_train * dataset.cfg.n_samples_per_data
   # go through one random multilevel graph at a time
   for epoch in range(cfg.train_cfg.epochs):
     train_mse = 0.0
@@ -133,3 +136,22 @@ def train(cfg: ConfigDict, use_tb: bool):
     if use_tb:
       writer.add_scalar("l2", train_l2, epoch)
       writer.add_scalar("mse", train_mse, epoch)
+
+  # TEST
+  test_data_gen = dataset.make_data_gen(cfg.train_cfg, test=True)
+  test_mse = 0.0
+  test_l2 = 0.0
+  n_test_pts = dataset.cfg.n_test * dataset.cfg.n_samples_per_data
+  iter_t = time.time()
+  for _ in range(n_test_pts):
+    data = next(test_data_gen)
+    loss, mse = evalulate(state, data)
+    test_l2 += loss
+    test_mse += mse
+
+  test_mse /= n_test_pts
+  test_l2 /= n_test_pts
+  iter_t = (time.time() - iter_t) / n_test_pts
+  logging.info(
+    f"test| mse: {train_mse:.6f}, l2: {train_l2:.6f}, iter_t: {iter_t:.6f}"
+  )

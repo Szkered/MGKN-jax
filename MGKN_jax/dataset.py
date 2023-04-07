@@ -218,19 +218,28 @@ class ParametricEllipticalPDE:
       cfg, node_data, edge_data, self.train_out
     )
 
-    self.n_data_per_epoch = self.cfg.n_train * self.cfg.n_samples_per_train_data
+    self.n_data_per_epoch = self.cfg.n_train * self.cfg.n_samples_per_data
+    logging.info("creating multilevel mesh...")
     if cfg.static_grids:
-      logging.info("creating multilevel mesh...")
-      self.data = []
-      for data_idx in tqdm(range(self.cfg.n_train)):
-        for _ in range(self.cfg.n_samples_per_train_data):
-          key, rng = jax.random.split(rng)
-          self.data.append(self.multi_mesh.sample(key, data_idx))
+      self.train_data = self.make_dataset(self.cfg.n_train)
+    self.test_data = self.make_dataset(self.cfg.n_test)
 
-  def make_data_gen(self, cfg: TrainConfig):
-    if self.cfg.static_grids:
+  def make_dataset(self, dataset_size: int):
+    rng = self.rng
+    dataset = []
+    for data_idx in tqdm(range(dataset_size)):
+      for _ in range(self.cfg.n_samples_per_data):
+        key, rng = jax.random.split(rng)
+        dataset.append(self.multi_mesh.sample(key, data_idx))
+    self.rng = rng
+    return dataset
+
+  def make_data_gen(self, cfg: TrainConfig, test: bool = False):
+    if self.cfg.static_grids or test:
+      dataset = self.test_data if test else self.train_data
+
       ds = _repeat_and_shuffle(
-        self.data, buffer_size=cfg.batch_size * cfg.num_shuffle_batches
+        dataset, buffer_size=cfg.batch_size * cfg.num_shuffle_batches
       )
       while True:
         yield next(ds)
@@ -242,7 +251,7 @@ class ParametricEllipticalPDE:
         data_idx_perms = jax.random.permutation(key, self.cfg.n_train)
         # for data_idx in range(self.cfg.n_train):
         for data_idx in data_idx_perms:
-          for _ in range(self.cfg.n_samples_per_train_data):
+          for _ in range(self.cfg.n_samples_per_data):
             key, rng = jax.random.split(rng)
             yield self.multi_mesh.sample(key, data_idx)
 

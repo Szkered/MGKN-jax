@@ -73,7 +73,8 @@ class DataConfig:
 
   n_test: int = 100
 
-  n_samples_per_train_data: int = 1
+  n_samples_per_data: int = 1
+  """the number of meshes to create for each pde data"""
 
   res: int = 1
   """resolution of grid"""
