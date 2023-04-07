@@ -1,3 +1,4 @@
+import time
 from typing import NamedTuple
 
 import haiku as hk
@@ -8,10 +9,9 @@ import optax
 import tensorboardX as tb
 from absl import logging
 from ml_collections import ConfigDict
-from tqdm import tqdm
 
 from MGKN_jax.config import TrainConfig
-from MGKN_jax.dataset import ParametricEllipticalPDE
+from MGKN_jax.dataset import Data, ParametricEllipticalPDE
 from MGKN_jax.model import MGKN
 
 
@@ -51,11 +51,12 @@ def train(cfg: ConfigDict):
   optimizer = get_optimizer(cfg.train_cfg)
 
   @hk.transform
-  def loss_fn(data):
-    y_pred = forward(data)  # (n_grid_pts, 1)
+  def loss_fn(data: Data):
+    y_pred = forward(data.input)  # (n_grid_pts, 1)
     y_pred = jnp.squeeze(y_pred)
-    y = data.nodes["outputs"]  # (n_grid_pts)
-    mean, std = data.globals  # (n_grid_pts)
+    y = data.label  # (n_grid_pts)
+    stats = data.input[0].globals
+    mean, std = stats[0], stats[1]  # (n_grid_pts)
     unnormalize = lambda y: (y * (std + 1e-5)) + mean
     y_pred_unnorm = unnormalize(y_pred)
     y_unnorm = unnormalize(y)
@@ -70,7 +71,7 @@ def train(cfg: ConfigDict):
     return jax.tree_util.tree_map(lambda g, l2g: g + l2g, grads, l2_grads)
 
   @jax.jit
-  def update(state: TrainingState, data: jraph.GraphsTuple):
+  def update(state: TrainingState, data: Data):
     rng, new_rng = jax.random.split(state.rng)
     loss_and_grad_fn = jax.value_and_grad(loss_fn.apply, has_aux=True)
     (loss, mse), grad = loss_and_grad_fn(state.params, rng, data)
@@ -99,11 +100,18 @@ def train(cfg: ConfigDict):
     )
 
   # init data
-  dataset = ParametricEllipticalPDE(cfg.train_cfg.data_cfg)
+  rng = jax.random.PRNGKey(cfg.train_cfg.rng_seed)
+  key, rng = jax.random.split(rng)
+  dataset = ParametricEllipticalPDE(cfg.train_cfg.data_cfg, key)
   data_gen = dataset.make_data_gen(cfg.train_cfg)
+
   data = next(data_gen)
 
-  rng = jax.random.PRNGKey(cfg.train_cfg.rng_seed)
+  # data2 = next(data_gen)
+  # batch = jraph.batch([data[0], data2[0]])
+  # ub1, ub2 = jraph.unbatch(batch)
+  # breakpoint()
+
   state = init(rng, data)
 
   writer = tb.SummaryWriter("logs")
@@ -115,7 +123,8 @@ def train(cfg: ConfigDict):
   for epoch in range(cfg.train_cfg.epochs):
     train_mse = 0.0
     train_l2 = 0.0
-    for _ in tqdm(range(n_data_per_epoch)):
+    iter_t = time.time()
+    for _ in range(n_data_per_epoch):
       data = next(data_gen)
       state, metrics = update(state, data)
       train_l2 += metrics['loss']
@@ -123,6 +132,9 @@ def train(cfg: ConfigDict):
 
     train_mse /= n_data_per_epoch
     train_l2 /= n_data_per_epoch
-    logging.info(f"{epoch}| mse: {train_mse:.6f}, l2: {train_l2:.6f}")
+    iter_t = (time.time() - iter_t) / n_data_per_epoch
+    logging.info(
+      f"{epoch}| mse: {train_mse:.6f}, l2: {train_l2:.6f}, iter_t: {iter_t:.6f}"
+    )
     writer.add_scalar("l2", train_l2, epoch)
     writer.add_scalar("mse", train_mse, epoch)

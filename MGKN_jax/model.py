@@ -1,4 +1,4 @@
-from typing import Callable, Iterable, Optional
+from typing import Callable, Iterable, List, Optional
 
 import haiku as hk
 import jax
@@ -111,12 +111,18 @@ class MGKN(hk.Module):
       self.cfg.finest_ker_width // (2**(l + 1)) for l in range(self.level)
     ]
 
-  def __call__(self, data: jraph.GraphsTuple):
+  def __call__(self, data: List[jraph.GraphsTuple]):
     """
+    Args:
+      data: Multilevel mesh/graph, where the inter-resolution graph between
+        level l and l+1 is stored in data[L+l], and the inner-resolution
+        graph at level l is stored in data[l], where L is the total
+        number of resolution levels. Node and globals are only stored
+        at the data[0].
     """
     width = self.cfg.nnconv_cfg.width
 
-    x = MLP([width], self.cfg.mlp_cfg, name="first")(data.nodes["inputs"])
+    x = MLP([width], self.cfg.mlp_cfg, name="first")(data[0].nodes)
 
     # TODO: only update necessary nodes to increase efficiency
     for d in range(self.cfg.depth):
@@ -128,8 +134,8 @@ class MGKN(hk.Module):
           name=f"K{l+1}{l+2}_{d}"
         )
         x = x + NNConv(kernel_l, self.cfg.nnconv_cfg)(
-          x, data.senders['inter'][l], data.receivers['inter'][l],
-          data.edges['inter'][l]
+          x, data[self.level + l].senders, data[self.level + l].receivers,
+          data[self.level + l].edges
         )
         x = jax.nn.relu(x)
 
@@ -141,10 +147,8 @@ class MGKN(hk.Module):
           self.cfg.mlp_cfg,
           name=f"K{l+1}{l+1}_{d}"
         )
-        x = x + NNConv(kernel_l_ii, self.cfg.nnconv_cfg)(
-          x, data.senders['inner'][l], data.receivers['inner'][l],
-          data.edges['inner'][l]
-        )
+        x = x + NNConv(kernel_l_ii, self.cfg.nnconv_cfg
+                      )(x, data[l].senders, data[l].receivers, data[l].edges)
         x = jax.nn.relu(x)
 
         if l < self.level - 1:  # from previous (coarser) level: K54, K43, K32, ...
@@ -153,12 +157,13 @@ class MGKN(hk.Module):
             self.cfg.mlp_cfg,
             name=f"K{l+2}{l+1}_{d}"
           )
-          # NOTE: To get up edge, flip the down edge
+          # NOTE: To get up edge index, flip sender and receiver;
+          # To get up edge attr, flip the down edge
           # (x0,y0), (x1,y1), (a0,a1) -> (x1,y1), (x0,y0), (a1,a0)
           swap_end_pt = np.array([2, 3, 0, 1, 5, 4])
           x = x + NNConv(kernel_l_ji, self.cfg.nnconv_cfg)(
-            x, data.receivers['inter'][l], data.senders['inter'][l],
-            data.edges['inter'][l][:, swap_end_pt]
+            x, data[self.level + l].receivers, data[self.level + l].senders,
+            data[self.level + l].edges[:, swap_end_pt]
           )
           x = jax.nn.relu(x)
 

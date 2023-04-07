@@ -1,7 +1,9 @@
 import itertools
 import random
 from dataclasses import asdict, dataclass, fields
-from typing import Any, Dict, Iterable, Iterator, List, Tuple, TypeVar
+from typing import (
+  Any, Dict, Iterable, Iterator, List, NamedTuple, Tuple, TypeVar
+)
 
 import h5py
 import jax
@@ -9,12 +11,19 @@ import jax.numpy as jnp
 import jraph
 import numpy as np
 import scipy.io
+from absl import logging
 from tqdm import tqdm
 
 from MGKN_jax.config import DataConfig, TrainConfig
 
 Array = np.ndarray
 _T = TypeVar('_T')
+
+
+class Data(NamedTuple):
+  """Container for the training data."""
+  input: List[jraph.GraphsTuple]
+  label: Array
 
 
 def load_file(file_path: str) -> Tuple[Any, bool]:
@@ -167,7 +176,7 @@ class ParametricEllipticalPDE:
     "Kcoeff_y",  # a_grady
   ]
 
-  def __init__(self, cfg: DataConfig):
+  def __init__(self, cfg: DataConfig, rng):
     self.cfg = cfg
     train_data, is_matlab_format = load_file(cfg.train_path)
 
@@ -210,44 +219,70 @@ class ParametricEllipticalPDE:
 
     self.n_data_per_epoch = self.cfg.n_train * self.cfg.n_samples_per_train_data
     if cfg.static_grids:
-      rng = jax.random.PRNGKey(cfg.rng_seed)
-      self.sampled_multimesh = []
+      logging.info("creating multilevel mesh...")
+      self.data = []
       for data_idx in tqdm(range(self.cfg.n_train)):
         for _ in range(self.cfg.n_samples_per_train_data):
           key, rng = jax.random.split(rng)
-          sample = self.multi_mesh.sample(key, data_idx)
-          self.sampled_multimesh.append(sample)
-
-  # def get_init_data(self) -> jraph.GraphsTuple:
-  #   return self.multi_mesh.sample(jax.random.PRNGKey(137), 0)
+          self.data.append(self.multi_mesh.sample(key, data_idx))
 
   def make_data_gen(self, cfg: TrainConfig):
     ds = _repeat_and_shuffle(
-      self.sampled_multimesh,
-      buffer_size=cfg.batch_size * cfg.num_shuffle_batches
+      self.data, buffer_size=cfg.batch_size * cfg.num_shuffle_batches
     )
     while True:
       yield next(ds)
 
-  # def make_data_gen(self, cfg: TrainConfig):
-  #   rng = jax.random.PRNGKey(cfg.rng_seed)
 
-  #   if self.cfg.static_grids:
-  #     for _ in range(cfg.epochs):
-  #       key, rng = jax.random.split(rng)
-  #       data_idx_perms = jax.random.permutation(key, self.n_data_per_epoch)
-  #       for data_idx in data_idx_perms:
-  #         yield self.samples[data_idx]
+def _nearest_bigger_power_of_two(x: int) -> int:
+  """Computes the nearest power of two greater than x for padding."""
+  y = 2
+  while y < x:
+    y *= 2
+  return y
 
-  #   else:
-  #     for _ in range(cfg.epochs):
-  #       key, rng = jax.random.split(rng)
-  #       data_idx_perms = jax.random.permutation(key, self.cfg.n_train)
-  #       # for data_idx in range(self.cfg.n_train):
-  #       for data_idx in data_idx_perms:
-  #         for _ in range(self.cfg.n_samples_per_train_data):
-  #           key, rng = jax.random.split(rng)
-  #           yield self.multi_mesh.sample(key, data_idx)
+
+def pad_graph_to_nearest_power_of_two(
+  graphs_tuple: jraph.GraphsTuple, edge_only: bool = True
+) -> jraph.GraphsTuple:
+  """Pads a batched `GraphsTuple` to the nearest power of two.
+
+  Jax will re-jit your graphnet every time a new graph shape is encountered.
+  In the limit, this means a new compilation every training step, which
+  will result in *extremely* slow training. To prevent this, pad each
+  batch of graphs to the nearest power of two. Since jax maintains a cache
+  of compiled programs, the compilation cost is amortized.
+  For example, if a `GraphsTuple` has 7 nodes, 5 edges and 3 graphs, this method
+
+  would pad the `GraphsTuple` nodes and edges:
+    7 nodes --> 8 nodes (2^3)
+    5 edges --> 8 edges (2^3)
+  And since padding is accomplished using `jraph.pad_with_graphs`, an extra
+  graph and node is added:
+    8 nodes --> 9 nodes
+    3 graphs --> 4 graphs
+
+  Args:
+    graphs_tuple: a batched `GraphsTuple` (can be batch size 1).
+    edge_only: If true only pad edges. Use this when nodes are already
+      of the same size
+  Returns:
+    A graphs_tuple batched to the nearest power of two.
+  """
+  # Add 1 since we need at least one padding node for pad_with_graphs.
+  if edge_only:
+    pad_nodes_to = jnp.sum(graphs_tuple.n_node) + 1
+  else:
+    pad_nodes_to = _nearest_bigger_power_of_two(
+      jnp.sum(graphs_tuple.n_node)
+    ) + 1
+  pad_edges_to = _nearest_bigger_power_of_two(jnp.sum(graphs_tuple.n_edge))
+  # Add 1 since we need at least one padding graph for pad_with_graphs.
+  # We do not pad to nearest power of two because the batch size is fixed.
+  pad_graphs_to = graphs_tuple.n_node.shape[0] + 1
+  return jraph.pad_with_graphs(
+    graphs_tuple, pad_nodes_to, pad_edges_to, pad_graphs_to
+  )
 
 
 class RandomMultiMeshGenerator:
@@ -289,7 +324,7 @@ class RandomMultiMeshGenerator:
     self.node_data = node_data
     self.edge_data = edge_data
 
-  def sample(self, key, data_idx: int) -> jraph.GraphsTuple:
+  def sample(self, key, data_idx: int) -> Tuple[List[jraph.GraphsTuple], Array]:
     """sample non-overlapping multi level/resolution graph from the loaded grid."""
     # sample nodes
     perm = jax.random.permutation(key, self.n_grid_pts)
@@ -308,76 +343,64 @@ class RandomMultiMeshGenerator:
       axis=-1
     )
     outputs = self.node_data["outputs"][data_idx, sampled_indices[0]]
-    nodes = dict(inputs=inputs, outputs=outputs)
 
     edge_sample = self.edge_data[data_idx, sampled_indices_all]
 
     # calculate connectivity
-    inner_edge_index, inter_edge_index = calc_multilevel_connectivity(
+    inner_edge_indices, inter_edge_indices = calc_multilevel_connectivity(
       self.sub_mesh_sizes, grid_samples, self.cfg.mesh_cfg.inner_radii,
       self.cfg.mesh_cfg.inter_radii
     )
 
     # edge attributes, which is grid_point + aux_edge_data
-    inner_edge_attr = [
+    inner_edge_attrs = [
       grid_sample_all[e_idx.T].reshape(-1, 2 * self.n_dim)
-      for e_idx in inner_edge_index
+      for e_idx in inner_edge_indices
     ]
-    inner_edge_attr = [
+    inner_edge_attrs = [
       np.concatenate([e_attr, edge_sample[e_idx.T]], axis=-1)
-      for e_idx, e_attr in zip(inner_edge_index, inner_edge_attr)
+      for e_idx, e_attr in zip(inner_edge_indices, inner_edge_attrs)
     ]
 
-    inter_edge_attr = [
+    inter_edge_attrs = [
       grid_sample_all[e_idx.T].reshape(-1, 2 * self.n_dim)
-      for e_idx in inter_edge_index
+      for e_idx in inter_edge_indices
     ]
-    inter_edge_attr = [
+    inter_edge_attrs = [
       np.concatenate([e_attr, edge_sample[e_idx.T]], axis=-1)
-      for e_idx, e_attr in zip(inter_edge_index, inter_edge_attr)
+      for e_idx, e_attr in zip(inter_edge_indices, inter_edge_attrs)
     ]
 
-    senders = dict(
-      inter=[i[0] for i in inter_edge_index],
-      inner=[i[0] for i in inner_edge_index]
-    )
-    receivers = dict(
-      inter=[i[1] for i in inter_edge_index],
-      inner=[i[1] for i in inner_edge_index]
-    )
+    edge_attrs = inner_edge_attrs + inter_edge_attrs
+    edge_indices = inner_edge_indices + inter_edge_indices
 
-    edges = dict(
-      inter=inter_edge_attr,
-      inner=inner_edge_attr,
-    )
-
-    # count nodes for each level
-    n_inner_nodes = np.array(self.sub_mesh_sizes)
-    n_inter_nodes = n_inner_nodes[:-1] + n_inner_nodes[1:]
-    n_node = dict(
-      inter=np.split(n_inter_nodes, self.level - 1),
-      inner=np.split(n_inner_nodes, self.level)
-    )
-
-    # combine edges from all level into a single tensor
-    n_inner_edges = np.array([e.shape[-1] for e in inner_edge_index])
-    n_inter_edges = np.array([e.shape[-1] for e in inter_edge_index])
-    n_edge = dict(
-      inter=np.split(n_inter_edges, self.level - 1),
-      inner=np.split(n_inner_edges, self.level)
-    )
-
-    gt = jraph.GraphsTuple(
-      nodes=nodes,
-      edges=edges,
-      senders=senders,
-      receivers=receivers,
-      n_node=n_node,
-      n_edge=n_edge,
-      globals=(
+    stats = np.vstack(
+      [
         self.train_out.mean[sampled_indices[0]],
-        self.train_out.std[sampled_indices[0]],
-      ),
+        self.train_out.std[sampled_indices[0]]
+      ]
     )
 
-    return gt
+    # max_n_edge = max([len(e) for e in edge_attrs])
+
+    graphs = []
+    for i, (edges, edge_index) in enumerate(zip(edge_attrs, edge_indices)):
+      nodes = inputs if i == 0 else np.zeros_like(inputs)
+      n_node = np.array([len(nodes)])
+      n_edge = np.array([len(edges)])
+      senders = edge_index[0]
+      receivers = edge_index[1]
+      globals = stats if i == 0 else np.zeros_like(stats)
+      gt = jraph.GraphsTuple(
+        nodes=nodes,
+        edges=edges,
+        senders=senders,
+        receivers=receivers,
+        n_node=n_node,
+        n_edge=n_edge,
+        globals=globals,  # not used
+      )
+      gt = pad_graph_to_nearest_power_of_two(gt)
+      graphs.append(gt)
+
+    return Data(input=graphs, label=outputs)
