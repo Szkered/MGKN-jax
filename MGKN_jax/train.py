@@ -104,14 +104,7 @@ def train(cfg: ConfigDict, use_tb: bool):
   key, rng = jax.random.split(rng)
   dataset = ParametricEllipticalPDE(cfg.train_cfg.data_cfg, key)
   data_gen = dataset.make_data_gen(cfg.train_cfg)
-
   data = next(data_gen)
-
-  # data2 = next(data_gen)
-  # batch = jraph.batch([data[0], data2[0]])
-  # ub1, ub2 = jraph.unbatch(batch)
-  # breakpoint()
-
   state = init(rng, data)
 
   if use_tb:

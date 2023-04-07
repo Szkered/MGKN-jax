@@ -252,8 +252,8 @@ def pad_graph_to_nearest_power_of_two(
   will result in *extremely* slow training. To prevent this, pad each
   batch of graphs to the nearest power of two. Since jax maintains a cache
   of compiled programs, the compilation cost is amortized.
-  For example, if a `GraphsTuple` has 7 nodes, 5 edges and 3 graphs, this method
 
+  For example, if a `GraphsTuple` has 7 nodes, 5 edges and 3 graphs, this method
   would pad the `GraphsTuple` nodes and edges:
     7 nodes --> 8 nodes (2^3)
     5 edges --> 8 edges (2^3)
@@ -380,8 +380,6 @@ class RandomMultiMeshGenerator:
         self.train_out.std[sampled_indices[0]]
       ]
     )
-
-    # max_n_edge = max([len(e) for e in edge_attrs])
 
     graphs = []
     for i, (edges, edge_index) in enumerate(zip(edge_attrs, edge_indices)):
