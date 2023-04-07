@@ -2,7 +2,8 @@ import itertools
 import random
 from dataclasses import asdict, dataclass, fields
 from typing import (
-  Any, Dict, Iterable, Iterator, List, NamedTuple, Tuple, TypeVar
+  Any, Dict, Iterable, Iterator, List, NamedTuple, Tuple, TypeVar, Union,
+  Literal
 )
 
 import h5py
@@ -210,27 +211,36 @@ class ParametricEllipticalPDE:
     )
 
     node_data = {
-      "inputs": [v.normalized for v in asdict(self.train_in).values()],
-      "outputs": self.train_out.normalized
+      "train":
+        {
+          "inputs": [v.normalized for v in asdict(self.train_in).values()],
+          "outputs": self.train_out
+        },
+      "test":
+        {
+          "inputs": [v.normalized for v in asdict(self.test_in).values()],
+          "outputs": self.test_out
+        }
     }
-    edge_data = self.train_in.coeff.normalized
-    self.multi_mesh = RandomMultiMeshGenerator(
-      cfg, node_data, edge_data, self.train_out
-    )
+    edge_data = {
+      "train": self.train_in.coeff.normalized,
+      "test": self.test_in.coeff.normalized,
+    }
+    self.multi_mesh = RandomMultiMeshGenerator(cfg, node_data, edge_data)
 
     self.n_data_per_epoch = self.cfg.n_train * self.cfg.n_samples_per_data
     logging.info("creating multilevel mesh...")
     if cfg.static_grids:
-      self.train_data = self.make_dataset(self.cfg.n_train)
-    self.test_data = self.make_dataset(self.cfg.n_test)
+      self.train_data = self.make_dataset(self.cfg.n_train, "train")
+    self.test_data = self.make_dataset(self.cfg.n_test, "test")
 
-  def make_dataset(self, dataset_size: int):
+  def make_dataset(self, dataset_size: int, split: Literal["train", "test"]):
     rng = self.rng
     dataset = []
     for data_idx in tqdm(range(dataset_size)):
       for _ in range(self.cfg.n_samples_per_data):
         key, rng = jax.random.split(rng)
-        dataset.append(self.multi_mesh.sample(key, data_idx))
+        dataset.append(self.multi_mesh.sample(key, data_idx, split))
     self.rng = rng
     return dataset
 
@@ -311,8 +321,10 @@ class RandomMultiMeshGenerator:
   """Generate multi-level mesh for multi-level graph representation."""
 
   def __init__(
-    self, cfg: DataConfig, node_data: Dict[str, List[Array]], edge_data: Array,
-    train_out
+    self,
+    cfg: DataConfig,
+    node_data: Dict[str, Dict[str, Union[Normalizer, List[Array]]]],
+    edge_data: Dict[str, Array],
   ):
     """
     Args:
@@ -326,7 +338,6 @@ class RandomMultiMeshGenerator:
     self.total_mesh_size = sub_mesh_sizes.sum()
     self.level = len(sub_mesh_sizes)
     self.n_dim = len(cfg.domain_boundary)
-    self.train_out = train_out
 
     assert len(cfg.mesh_size) == self.n_dim
 
@@ -346,7 +357,12 @@ class RandomMultiMeshGenerator:
     self.node_data = node_data
     self.edge_data = edge_data
 
-  def sample(self, key, data_idx: int) -> Tuple[List[jraph.GraphsTuple], Array]:
+  def sample(
+    self,
+    key,
+    data_idx: int,
+    split: Literal["train", "test"] = "train"
+  ) -> Tuple[List[jraph.GraphsTuple], Array]:
     """sample non-overlapping multi level/resolution graph from the loaded grid."""
     # sample nodes
     perm = jax.random.permutation(key, self.n_grid_pts)
@@ -357,16 +373,18 @@ class RandomMultiMeshGenerator:
     grid_samples = [self.grid[idx] for idx in sampled_indices]
     grid_sample_all = self.grid[sampled_indices_all]
 
+    node_data = self.node_data[split]
+    edge_data = self.edge_data[split]
+
     inputs = np.concatenate(
       [grid_sample_all] + [
-        d[data_idx, sampled_indices_all][..., None]
-        for d in self.node_data["inputs"]
+        d[data_idx, sampled_indices_all][..., None] for d in node_data["inputs"]
       ],
       axis=-1
     )
-    outputs = self.node_data["outputs"][data_idx, sampled_indices[0]]
+    outputs = node_data["outputs"].normalized[data_idx, sampled_indices[0]]
 
-    edge_sample = self.edge_data[data_idx, sampled_indices_all]
+    edge_sample = edge_data[data_idx, sampled_indices_all]
 
     # calculate connectivity
     inner_edge_indices, inter_edge_indices = calc_multilevel_connectivity(
@@ -398,8 +416,8 @@ class RandomMultiMeshGenerator:
 
     stats = np.vstack(
       [
-        self.train_out.mean[sampled_indices[0]],
-        self.train_out.std[sampled_indices[0]]
+        node_data["outputs"].mean[sampled_indices[0]],
+        node_data["outputs"].std[sampled_indices[0]]
       ]
     )
 
