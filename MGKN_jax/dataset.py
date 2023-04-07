@@ -177,6 +177,7 @@ class ParametricEllipticalPDE:
   ]
 
   def __init__(self, cfg: DataConfig, rng):
+    self.rng = rng
     self.cfg = cfg
     train_data, is_matlab_format = load_file(cfg.train_path)
 
@@ -227,11 +228,23 @@ class ParametricEllipticalPDE:
           self.data.append(self.multi_mesh.sample(key, data_idx))
 
   def make_data_gen(self, cfg: TrainConfig):
-    ds = _repeat_and_shuffle(
-      self.data, buffer_size=cfg.batch_size * cfg.num_shuffle_batches
-    )
-    while True:
-      yield next(ds)
+    if self.cfg.static_grids:
+      ds = _repeat_and_shuffle(
+        self.data, buffer_size=cfg.batch_size * cfg.num_shuffle_batches
+      )
+      while True:
+        yield next(ds)
+
+    else:
+      rng = self.rng
+      for _ in range(cfg.epochs):
+        key, rng = jax.random.split(rng)
+        data_idx_perms = jax.random.permutation(key, self.cfg.n_train)
+        # for data_idx in range(self.cfg.n_train):
+        for data_idx in data_idx_perms:
+          for _ in range(self.cfg.n_samples_per_train_data):
+            key, rng = jax.random.split(rng)
+            yield self.multi_mesh.sample(key, data_idx)
 
 
 def _nearest_bigger_power_of_two(x: int) -> int:
