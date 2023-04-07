@@ -42,7 +42,7 @@ def get_optimizer(cfg: TrainConfig):
   return optimizer
 
 
-def train(cfg: ConfigDict):
+def train(cfg: ConfigDict, use_tb: bool):
 
   def forward(data: jraph.GraphsTuple):
     model = MGKN(cfg.mgkn_cfg)
@@ -114,7 +114,8 @@ def train(cfg: ConfigDict):
 
   state = init(rng, data)
 
-  writer = tb.SummaryWriter("logs")
+  if use_tb:
+    writer = tb.SummaryWriter("logs")
 
   n_data_per_epoch = (
     dataset.cfg.n_train * dataset.cfg.n_samples_per_train_data
@@ -136,5 +137,6 @@ def train(cfg: ConfigDict):
     logging.info(
       f"{epoch}| mse: {train_mse:.6f}, l2: {train_l2:.6f}, iter_t: {iter_t:.6f}"
     )
-    writer.add_scalar("l2", train_l2, epoch)
-    writer.add_scalar("mse", train_mse, epoch)
+    if use_tb:
+      writer.add_scalar("l2", train_l2, epoch)
+      writer.add_scalar("mse", train_mse, epoch)
