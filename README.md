@@ -1,6 +1,8 @@
 # MGKN-jax
 
-`jax` implementation of [(MGKN) Multipole Graph Neural Operator for Parametric Partial Differential Equations](https://arxiv.org/abs/2006.09535). [Original implementation in pytorch](https://github.com/neuraloperator/graph-pde)
+`jax` implementation of [(MGKN) Multipole Graph Neural Operator for Parametric Partial Differential Equations](https://arxiv.org/abs/2006.09535).
+
+[Original implementation in pytorch](https://github.com/neuraloperator/graph-pde)
 
 ## Download Dataset
 
@@ -23,5 +25,9 @@ python main.py
 
 The configuration is stored in `MGKN_jax/config.py`. To run training with custom config, add config flags, e.g.:
 ```bash
+# train more epochs
+python main.py --config.train_cfg.epochs 400
+
+# use different mesh per epoch
 python main.py --config.train_cfg.data_cfg.static_grids=False
 ```

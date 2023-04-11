@@ -15,3 +15,11 @@ docs/_build/
 *.zip
 /*.mat
 /data/
+/report/.auctex-auto/
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+/report/report.synctex.gz
+/report/*.xdv
